@@ -1,0 +1,42 @@
+{
+  "goal": "Fix the checkout retry bug",
+  "task": {
+    "kind": "issue_assignment",
+    "taskId": "task-1",
+    "issueId": "MUL-123",
+    "prompt": "Fix retry behavior and add tests."
+  },
+  "workspace": {
+    "id": "ws-1",
+    "name": "Core",
+    "context": "Prefer small changes and post concise final comments.",
+    "repos": [{ "url": "https://github.com/acme/shop" }]
+  },
+  "agent": {
+    "id": "agent-1",
+    "name": "Fixer",
+    "runtimeId": "runtime-1",
+    "provider": "codex",
+    "model": "gpt-5-codex",
+    "instructions": "You fix bugs with tests first.",
+    "skills": [
+      {
+        "name": "bug-fixer",
+        "version": "1.0.0",
+        "permissions": ["repo:write", "shell:write"],
+        "riskLevel": "high"
+      }
+    ],
+    "customEnv": {
+      "ANTHROPIC_API_KEY": "secret",
+      "SAFE_FLAG": "true"
+    },
+    "mcpServers": ["filesystem"]
+  },
+  "permissions": {
+    "tokenType": "mat_task_scoped",
+    "ttlMinutes": 1440,
+    "scopes": ["workspace:read", "issue:comment", "repo:write"]
+  },
+  "plan": ["Read issue and comments", "Patch retry code", "Run tests"]
+}
