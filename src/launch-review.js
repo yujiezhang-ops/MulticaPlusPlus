@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-const SECRET_ENV_PATTERNS = [
+export const SECRET_ENV_PATTERNS = [
   "TOKEN",
   "SECRET",
   "PASSWORD",
