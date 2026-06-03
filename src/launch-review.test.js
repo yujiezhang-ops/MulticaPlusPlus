@@ -29,6 +29,7 @@ test("keeps launch review module boundaries explicit", async () => {
 
   const specExports = await import("./spec/index.js");
   assert.deepEqual(Object.keys(specExports).sort(), [
+    "RuntimeAgentSpecSchema",
     "buildRuntimeAgentSpec",
     "normalizeMcpServers",
     "normalizePermissions",
@@ -38,6 +39,7 @@ test("keeps launch review module boundaries explicit", async () => {
     "schemaVersion",
     "stableHash",
     "stableStringify",
+    "validateRuntimeAgentSpec",
   ]);
 
   const overlayExports = await import("./overlay/index.js");
@@ -124,11 +126,46 @@ test("builds a reviewable runtime agent spec for an issue assignment", () => {
   assert.match(spec.instructionOverlay.diff, /\+ Agent Instructions/);
 });
 
+test("builds a defaulted spec instead of throwing for malformed input", () => {
+  const spec = buildRuntimeAgentSpec({
+    goal: 123,
+    workspace: {
+      id: 456,
+      repos: "not-repos",
+    },
+    task: {
+      kind: "weird",
+      triggerPayload: null,
+    },
+    agent: {
+      skills: "not-skills",
+      customEnv: "not-env",
+      mcpServers: 99,
+    },
+    permissions: {
+      ttlMinutes: -1,
+      scopes: 123,
+    },
+    plan: 123,
+  });
+
+  assert.match(spec.specId, /^ras_[a-f0-9]{16}$/);
+  assert.equal(spec.goal, "");
+  assert.equal(spec.workspace.id, "");
+  assert.deepEqual(spec.workspace.repos, []);
+  assert.equal(spec.task.kind, "issue_assignment");
+  assert.deepEqual(spec.skills, []);
+  assert.deepEqual(spec.capabilityReview.envKeys, []);
+  assert.equal(spec.permissions.ttlMinutes, 1440);
+  assert.deepEqual(spec.permissions.scopes, []);
+  assert.deepEqual(spec.initialPlan, []);
+});
+
 test("renders launch review markdown with comment and autopilot context", () => {
   const commentSpec = buildRuntimeAgentSpec({
     goal: "Answer latest reviewer question",
     task: {
-      kind: "comment_trigger",
+      kind: "comment_mention",
       issueId: "MUL-456",
       taskId: "task-2",
       triggerCommentId: "comment-9",
@@ -139,14 +176,14 @@ test("renders launch review markdown with comment and autopilot context", () => 
   });
   const commentReview = renderLaunchReviewMarkdown(commentSpec);
 
-  assert.match(commentReview, /comment_trigger/);
+  assert.match(commentReview, /comment_mention/);
   assert.match(commentReview, /Trigger comment: `comment-9`/);
   assert.match(commentReview, /Can you verify the migration\?/);
 
   const autopilotSpec = buildRuntimeAgentSpec({
     goal: "Run weekly dependency audit",
     task: {
-      kind: "autopilot_run",
+      kind: "autopilot",
       taskId: "task-3",
       autopilotId: "ap-1",
       autopilotRunId: "run-1",
@@ -158,7 +195,7 @@ test("renders launch review markdown with comment and autopilot context", () => 
   });
   const autopilotReview = renderLaunchReviewMarkdown(autopilotSpec);
 
-  assert.match(autopilotReview, /autopilot_run/);
+  assert.match(autopilotReview, /autopilot/);
   assert.match(autopilotReview, /Autopilot: `ap-1`/);
   assert.match(autopilotReview, /"cron": "0 9 \* \* 1"/);
 });
@@ -277,7 +314,7 @@ test("cli locks and lists ledger records for assignment, comment, and autopilot 
         payload: {
           goal: "Review a comment trigger",
           task: {
-            kind: "comment_trigger",
+            kind: "comment_mention",
             taskId: "task-comment",
             issueId: "MUL-101",
             triggerCommentId: "comment-1",
@@ -292,7 +329,7 @@ test("cli locks and lists ledger records for assignment, comment, and autopilot 
         payload: {
           goal: "Review an autopilot run",
           task: {
-            kind: "autopilot_run",
+            kind: "autopilot",
             taskId: "task-autopilot",
             autopilotId: "ap-1",
             autopilotRunId: "run-1",
