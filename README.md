@@ -1,5 +1,7 @@
 # Multica Launch Review
 
+中文版说明: [README.zh-CN.md](README.zh-CN.md)
+
 External pre-run initialization layer for Multica agent tasks.
 
 This project does not fork Multica or replace its issue board, runtime daemon,
