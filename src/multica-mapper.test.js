@@ -260,6 +260,59 @@ if (resource === "issue" && command === "get") {
   }
 });
 
+test("cli surfaces mapper warnings and errors in review output and stderr", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-launch-review-degradation-cli-"));
+  try {
+    const mockClient = join(dir, "mock-multica.js");
+    const reviewPath = join(dir, "review.md");
+    await writeFile(mockClient, `#!/usr/bin/env node
+const [resource, command] = process.argv.slice(2);
+function out(value) { process.stdout.write(JSON.stringify(value)); }
+if (resource === "issue" && command === "get") {
+  out({ id: "issue-uuid", identifier: "SPA-5" });
+} else if (resource === "agent" && command === "get") {
+  console.error("agent unavailable");
+  process.exit(1);
+} else {
+  console.error("unexpected command", process.argv.slice(2).join(" "));
+  process.exit(1);
+}
+`);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        "src/cli.js",
+        "from-multica",
+        "--issue-id",
+        "issue-uuid",
+        "--agent-id",
+        "agent-1",
+        "--cli-path",
+        mockClient,
+        "--review-out",
+        reviewPath,
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /Degradation warnings:/);
+    assert.match(result.stderr, /missing:issue.title/);
+    assert.match(result.stderr, /Degradation errors:/);
+    assert.match(result.stderr, /agent:agent unavailable/);
+
+    const review = await readFile(reviewPath, "utf8");
+    assert.match(review, /## Degradation/);
+    assert.match(review, /### Warnings/);
+    assert.match(review, /`missing:issue.title`/);
+    assert.match(review, /### Errors/);
+    assert.match(review, /`agent:agent unavailable`/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 async function writeFile(path, value) {
   const { writeFile: write } = await import("node:fs/promises");
   await write(path, value, "utf8");

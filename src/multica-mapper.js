@@ -91,6 +91,20 @@ export async function buildRuntimeAgentSpecFromMultica({
   };
 }
 
+export function renderDegradationMarkdown({ warnings = [], errors = [] } = {}) {
+  const sections = [];
+  if (warnings.length) {
+    sections.push("### Warnings", "", ...warnings.map((warning) => `- \`${warning}\``));
+  }
+  if (errors.length) {
+    sections.push("### Errors", "", ...errors.map((error) => `- \`${error}\``));
+  }
+  if (!sections.length) {
+    return "";
+  }
+  return ["## Degradation", "", ...sections, ""].join("\n");
+}
+
 async function readEnvelope(read, name, warnings, errors) {
   let result;
   try {

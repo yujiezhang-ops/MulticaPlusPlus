@@ -17,6 +17,7 @@ test("keeps launch review module boundaries explicit", async () => {
     "buildRuntimeAgentSpec",
     "buildRuntimeAgentSpecFromMultica",
     "createLedgerStore",
+    "renderDegradationMarkdown",
     "renderLaunchReviewMarkdown",
   ]);
 

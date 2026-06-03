@@ -6,6 +6,7 @@ import {
   buildRuntimeAgentSpecFromMultica,
   buildRuntimeAgentSpec,
   createLedgerStore,
+  renderDegradationMarkdown,
   renderLaunchReviewMarkdown,
 } from "./launch-review.js";
 import { createMulticaClient } from "./multica-client.js";
@@ -83,7 +84,9 @@ async function generateFromMultica(args) {
     },
     plan: args.plan,
   });
-  const review = renderLaunchReviewMarkdown(result.spec);
+  const degradation = renderDegradationMarkdown(result);
+  const review = [renderLaunchReviewMarkdown(result.spec), degradation].filter(Boolean).join("\n");
+  writeDegradationToStderr(result);
 
   if (args.specOut) {
     await writeArtifact(args.specOut, JSON.stringify(result.spec, null, 2) + "\n");
@@ -97,6 +100,15 @@ async function generateFromMultica(args) {
 
   if (!args.specOut && !args.reviewOut) {
     process.stdout.write(review);
+  }
+}
+
+function writeDegradationToStderr({ warnings = [], errors = [] }) {
+  if (warnings.length) {
+    process.stderr.write(`Degradation warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}\n`);
+  }
+  if (errors.length) {
+    process.stderr.write(`Degradation errors:\n${errors.map((error) => `- ${error}`).join("\n")}\n`);
   }
 }
 
