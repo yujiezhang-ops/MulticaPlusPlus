@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-import { SECRET_ENV_PATTERNS } from "./launch-review.js";
+import { SECRET_ENV_PATTERNS } from "./capability/index.js";
 
 export function createMulticaClient({ exec, cliPath = "multica", timeoutMs = 15000 } = {}) {
   const run = exec ?? createDefaultExec({ cliPath, timeoutMs });
