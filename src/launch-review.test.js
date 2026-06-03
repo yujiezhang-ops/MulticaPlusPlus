@@ -314,7 +314,7 @@ test("cli locks and lists ledger records for assignment, comment, and autopilot 
         payload: {
           goal: "Review a comment trigger",
           task: {
-            kind: "comment_trigger",
+            kind: "comment_mention",
             taskId: "task-comment",
             issueId: "MUL-101",
             triggerCommentId: "comment-1",
@@ -329,7 +329,7 @@ test("cli locks and lists ledger records for assignment, comment, and autopilot 
         payload: {
           goal: "Review an autopilot run",
           task: {
-            kind: "autopilot_run",
+            kind: "autopilot",
             taskId: "task-autopilot",
             autopilotId: "ap-1",
             autopilotRunId: "run-1",
