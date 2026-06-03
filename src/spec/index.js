@@ -2,17 +2,19 @@ import { createHash } from "node:crypto";
 
 import { buildCapabilityReview } from "../capability/index.js";
 import { buildInstructionOverlay } from "../overlay/index.js";
+import { schemaVersion, validateRuntimeAgentSpec } from "./schema.js";
 
-export const schemaVersion = "multica.launch_review.v1";
+export { RuntimeAgentSpecSchema, schemaVersion, validateRuntimeAgentSpec } from "./schema.js";
 
-export function buildRuntimeAgentSpec(input) {
+export function buildRuntimeAgentSpec(input = {}) {
+  input = isPlainObject(input) ? input : {};
   const now = input.createdAt ?? new Date().toISOString();
-  const workspace = input.workspace ?? {};
-  const agent = input.agent ?? {};
-  const task = input.task ?? {};
+  const workspace = isPlainObject(input.workspace) ? input.workspace : {};
+  const agent = isPlainObject(input.agent) ? input.agent : {};
+  const task = isPlainObject(input.task) ? input.task : {};
   const skills = normalizeSkills(agent.skills ?? input.skills ?? []);
   const repos = normalizeRepos(input.repos ?? workspace.repos ?? []);
-  const env = agent.customEnv ?? input.customEnv ?? {};
+  const env = normalizeEnv(agent.customEnv ?? input.customEnv ?? {});
   const mcpServers = normalizeMcpServers(agent.mcpServers ?? input.mcpServers ?? []);
   const permissions = normalizePermissions(input.permissions);
   const instructionOverlay = buildInstructionOverlay({
@@ -66,8 +68,9 @@ export function buildRuntimeAgentSpec(input) {
     initialPlan: Array.isArray(input.plan) ? input.plan.slice() : [],
   };
 
-  draft.specId = `ras_${stableHash(draft).slice(0, 16)}`;
-  return draft;
+  const spec = validateRuntimeAgentSpec(draft).spec;
+  spec.specId = `ras_${stableHash(spec).slice(0, 16)}`;
+  return spec;
 }
 
 export function renderLaunchReviewMarkdown(spec) {
@@ -149,6 +152,9 @@ export function renderLaunchReviewMarkdown(spec) {
 }
 
 export function normalizeSkills(skills) {
+  if (!Array.isArray(skills)) {
+    return [];
+  }
   return skills.map((skill) => ({
     name: skill.name ?? "",
     version: skill.version ?? "",
@@ -159,6 +165,9 @@ export function normalizeSkills(skills) {
 }
 
 export function normalizeRepos(repos) {
+  if (!Array.isArray(repos)) {
+    return [];
+  }
   return repos.map((repo) => (typeof repo === "string" ? { url: repo } : { url: repo.url ?? "" }));
 }
 
@@ -173,11 +182,20 @@ export function normalizeMcpServers(servers) {
 }
 
 export function normalizePermissions(permissions = {}) {
+  permissions = isPlainObject(permissions) ? permissions : {};
   return {
     tokenType: permissions.tokenType ?? "mat_task_scoped",
     ttlMinutes: permissions.ttlMinutes ?? 1440,
     scopes: Array.isArray(permissions.scopes) ? permissions.scopes.slice() : [],
   };
+}
+
+function normalizeEnv(env) {
+  return isPlainObject(env) ? env : {};
+}
+
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 export function stableHash(value) {
