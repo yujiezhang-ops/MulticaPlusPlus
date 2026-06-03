@@ -3,10 +3,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import {
+  buildRuntimeAgentSpecFromMultica,
   buildRuntimeAgentSpec,
   createLedgerStore,
   renderLaunchReviewMarkdown,
 } from "./launch-review.js";
+import { createMulticaClient } from "./multica-client.js";
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -26,6 +28,14 @@ async function main() {
       process.exit(0);
     }
     await listLedger(args);
+    return;
+  }
+  if (command === "from-multica") {
+    if (args.help || !args.issueId) {
+      printHelp(command);
+      process.exit(args.help ? 0 : 1);
+    }
+    await generateFromMultica(args);
     return;
   }
   if (command !== "generate") {
@@ -48,6 +58,41 @@ async function main() {
   }
   if (args.ledger) {
     await createLedgerStore(args.ledger).recordDraft(spec);
+  }
+
+  if (!args.specOut && !args.reviewOut) {
+    process.stdout.write(review);
+  }
+}
+
+async function generateFromMultica(args) {
+  const repos = Array.isArray(args.repo) ? args.repo.map((url) => ({ url })) : [];
+  const result = await buildRuntimeAgentSpecFromMultica({
+    client: createMulticaClient({ cliPath: args.cliPath }),
+    issueId: args.issueId,
+    agentId: args.agentId,
+    workspace: {
+      id: args.workspaceId,
+      name: args.workspaceName,
+      repos,
+    },
+    permissions: {
+      tokenType: args.tokenType,
+      ttlMinutes: args.ttlMinutes,
+      scopes: args.scope,
+    },
+    plan: args.plan,
+  });
+  const review = renderLaunchReviewMarkdown(result.spec);
+
+  if (args.specOut) {
+    await writeArtifact(args.specOut, JSON.stringify(result.spec, null, 2) + "\n");
+  }
+  if (args.reviewOut) {
+    await writeArtifact(args.reviewOut, review);
+  }
+  if (args.ledger) {
+    await createLedgerStore(args.ledger).recordDraft(result.spec);
   }
 
   if (!args.specOut && !args.reviewOut) {
@@ -108,6 +153,36 @@ function parseArgs(argv) {
       case "-i":
         parsed.input = argv[++index];
         break;
+      case "--issue-id":
+        parsed.issueId = argv[++index];
+        break;
+      case "--agent-id":
+        parsed.agentId = argv[++index];
+        break;
+      case "--cli-path":
+        parsed.cliPath = argv[++index];
+        break;
+      case "--workspace-id":
+        parsed.workspaceId = argv[++index];
+        break;
+      case "--workspace-name":
+        parsed.workspaceName = argv[++index];
+        break;
+      case "--repo":
+        parsed.repo = appendArg(parsed.repo, argv[++index]);
+        break;
+      case "--scope":
+        parsed.scope = appendArg(parsed.scope, argv[++index]);
+        break;
+      case "--plan":
+        parsed.plan = appendArg(parsed.plan, argv[++index]);
+        break;
+      case "--token-type":
+        parsed.tokenType = argv[++index];
+        break;
+      case "--ttl-minutes":
+        parsed.ttlMinutes = Number(argv[++index]);
+        break;
       case "--spec-out":
         parsed.specOut = argv[++index];
         break;
@@ -136,7 +211,21 @@ function parseArgs(argv) {
   return parsed;
 }
 
+function appendArg(value, next) {
+  return [...(Array.isArray(value) ? value : []), next];
+}
+
 function printHelp(command = "generate") {
+  if (command === "from-multica") {
+    process.stdout.write(`multica-launch-review from-multica
+
+Generate a Runtime Agent Spec by reading Multica issue, agent, runtime, and skills data.
+
+Usage:
+  multica-launch-review from-multica --issue-id MUL-123 [--agent-id agent-id] [--workspace-name name] [--repo url] [--spec-out spec.json] [--review-out review.md]
+`);
+    return;
+  }
   if (command === "lock") {
     process.stdout.write(`multica-launch-review lock
 
@@ -163,6 +252,7 @@ Generate a pre-run Runtime Agent Spec and launch review for Multica tasks.
 
 Usage:
   multica-launch-review --input task.json [--spec-out spec.json] [--review-out review.md] [--ledger ledger.jsonl]
+  multica-launch-review from-multica --issue-id MUL-123 [--agent-id agent-id] [--spec-out spec.json] [--review-out review.md]
   multica-launch-review lock --ledger ledger.jsonl --spec-id ras_... [--approved-by user] [--output json]
   multica-launch-review list --ledger ledger.jsonl [--spec-id ras_...] [--output json]
 

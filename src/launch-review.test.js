@@ -15,6 +15,7 @@ test("keeps launch review module boundaries explicit", async () => {
   const publicExports = await import("./launch-review.js");
   assert.deepEqual(Object.keys(publicExports).sort(), [
     "buildRuntimeAgentSpec",
+    "buildRuntimeAgentSpecFromMultica",
     "createLedgerStore",
     "renderLaunchReviewMarkdown",
   ]);

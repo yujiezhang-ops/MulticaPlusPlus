@@ -38,7 +38,9 @@ export function createMulticaClient({ exec, cliPath = "multica", timeoutMs = 150
 
 function createDefaultExec({ cliPath, timeoutMs }) {
   return (args) => new Promise((resolve, reject) => {
-    const child = spawn(cliPath, args, { windowsHide: true });
+    const command = cliPath.endsWith(".js") || cliPath.endsWith(".mjs") ? process.execPath : cliPath;
+    const commandArgs = command === cliPath ? args : [cliPath, ...args];
+    const child = spawn(command, commandArgs, { windowsHide: true });
     let stdout = "";
     let stderr = "";
     let timedOut = false;

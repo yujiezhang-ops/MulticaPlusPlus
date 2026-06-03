@@ -78,6 +78,18 @@ node src/cli.js \
 If no output files are supplied, the launch review markdown is printed to
 stdout.
 
+Generate a spec from read-only Multica data:
+
+```bash
+node src/cli.js from-multica \
+  --issue-id MUL-123 \
+  --agent-id agent-uuid \
+  --workspace-name Core \
+  --repo https://github.com/acme/shop \
+  --spec-out out/spec.json \
+  --review-out out/review.md
+```
+
 ## Intended Integration
 
 Use this as a pre-submit or pre-launch step around Multica:
