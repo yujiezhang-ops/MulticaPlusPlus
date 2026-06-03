@@ -7,6 +7,7 @@ export async function buildRuntimeAgentSpecFromMultica({
   agentId,
   createdAt,
   workspace = {},
+  task = {},
   repos,
   permissions,
   plan,
@@ -43,25 +44,16 @@ export async function buildRuntimeAgentSpecFromMultica({
     createdAt,
     goal: issue.title ?? "",
     task: {
-      kind: "issue_assignment",
+      kind: task.kind ?? "issue_assignment",
       taskId: issue.id ?? issueId ?? "",
       issueId: issue.identifier || issue.id || issueId || "",
+      triggerCommentId: task.triggerCommentId ?? "",
+      triggerComment: task.triggerComment ?? "",
       prompt: issue.description ?? "",
-      triggerPayload: {
-        source: "multica",
-        issue: {
-          id: issue.id ?? "",
-          identifier: issue.identifier ?? "",
-          status: issue.status ?? "",
-          priority: issue.priority ?? "",
-          projectId: issue.projectId ?? "",
-          workspaceId: issue.workspaceId ?? "",
-          parentIssueId: issue.parentIssueId ?? "",
-          metadata: issue.metadata ?? {},
-          createdAt: issue.createdAt ?? "",
-          updatedAt: issue.updatedAt ?? "",
-        },
-      },
+      autopilotId: task.autopilotId ?? "",
+      autopilotRunId: task.autopilotRunId ?? "",
+      autopilotSource: task.autopilotSource ?? "",
+      triggerPayload: buildTriggerPayload(issue, task.triggerPayload),
     },
     workspace: {
       id: workspace.id ?? issue.workspaceId ?? "",
@@ -129,4 +121,23 @@ function envKeyMap(env) {
     return Object.fromEntries(env.keys.map((key) => [key, ""]));
   }
   return {};
+}
+
+function buildTriggerPayload(issue, trigger) {
+  return {
+    source: "multica",
+    issue: {
+      id: issue.id ?? "",
+      identifier: issue.identifier ?? "",
+      status: issue.status ?? "",
+      priority: issue.priority ?? "",
+      projectId: issue.projectId ?? "",
+      workspaceId: issue.workspaceId ?? "",
+      parentIssueId: issue.parentIssueId ?? "",
+      metadata: issue.metadata ?? {},
+      createdAt: issue.createdAt ?? "",
+      updatedAt: issue.updatedAt ?? "",
+    },
+    ...(trigger === undefined ? {} : { trigger }),
+  };
 }

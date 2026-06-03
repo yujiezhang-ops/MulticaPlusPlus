@@ -1,0 +1,49 @@
+{
+  "goal": "Run the scheduled dependency audit",
+  "task": {
+    "kind": "autopilot",
+    "taskId": "task-3",
+    "issueId": "MUL-789",
+    "prompt": "Run the weekly dependency audit and report findings.",
+    "autopilotId": "autopilot-1",
+    "autopilotRunId": "run-2026-06-03",
+    "autopilotSource": "schedule",
+    "triggerPayload": {
+      "cron": "0 9 * * 1",
+      "timezone": "UTC"
+    }
+  },
+  "workspace": {
+    "id": "ws-1",
+    "name": "Core",
+    "context": "Prefer small changes and post concise final comments.",
+    "repos": [{ "url": "https://github.com/acme/shop" }]
+  },
+  "agent": {
+    "id": "agent-1",
+    "name": "Auditor",
+    "runtimeId": "runtime-1",
+    "provider": "codex",
+    "model": "gpt-5-codex",
+    "instructions": "Summarize audit findings without exposing secrets.",
+    "skills": [
+      {
+        "name": "dependency-auditor",
+        "version": "1.0.0",
+        "permissions": ["repo:read", "shell:read"],
+        "riskLevel": "medium"
+      }
+    ],
+    "customEnv": {
+      "SAFE_FLAG": "true",
+      "NPM_TOKEN": "secret"
+    },
+    "mcpServers": ["filesystem"]
+  },
+  "permissions": {
+    "tokenType": "mat_task_scoped",
+    "ttlMinutes": 1440,
+    "scopes": ["workspace:read", "repo:read"]
+  },
+  "plan": ["Collect dependency state", "Run the audit command", "Summarize findings"]
+}

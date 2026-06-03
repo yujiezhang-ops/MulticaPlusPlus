@@ -77,6 +77,7 @@ async function generateFromMultica(args) {
       name: args.workspaceName,
       repos,
     },
+    task: buildTaskArgs(args),
     permissions: {
       tokenType: args.tokenType,
       ttlMinutes: args.ttlMinutes,
@@ -168,6 +169,27 @@ function parseArgs(argv) {
       case "--issue-id":
         parsed.issueId = argv[++index];
         break;
+      case "--task-kind":
+        parsed.taskKind = argv[++index];
+        break;
+      case "--trigger-comment-id":
+        parsed.triggerCommentId = argv[++index];
+        break;
+      case "--trigger-comment":
+        parsed.triggerComment = argv[++index];
+        break;
+      case "--autopilot-id":
+        parsed.autopilotId = argv[++index];
+        break;
+      case "--autopilot-run-id":
+        parsed.autopilotRunId = argv[++index];
+        break;
+      case "--autopilot-source":
+        parsed.autopilotSource = argv[++index];
+        break;
+      case "--trigger-payload":
+        parsed.triggerPayload = JSON.parse(argv[++index]);
+        break;
       case "--agent-id":
         parsed.agentId = argv[++index];
         break;
@@ -227,6 +249,18 @@ function appendArg(value, next) {
   return [...(Array.isArray(value) ? value : []), next];
 }
 
+function buildTaskArgs(args) {
+  return {
+    kind: args.taskKind,
+    triggerCommentId: args.triggerCommentId,
+    triggerComment: args.triggerComment,
+    autopilotId: args.autopilotId,
+    autopilotRunId: args.autopilotRunId,
+    autopilotSource: args.autopilotSource,
+    triggerPayload: args.triggerPayload,
+  };
+}
+
 function printHelp(command = "generate") {
   if (command === "from-multica") {
     process.stdout.write(`multica-launch-review from-multica
@@ -234,7 +268,7 @@ function printHelp(command = "generate") {
 Generate a Runtime Agent Spec by reading Multica issue, agent, runtime, and skills data.
 
 Usage:
-  multica-launch-review from-multica --issue-id MUL-123 [--agent-id agent-id] [--workspace-name name] [--repo url] [--spec-out spec.json] [--review-out review.md]
+  multica-launch-review from-multica --issue-id MUL-123 [--task-kind issue_assignment|comment_mention|autopilot] [--agent-id agent-id] [--workspace-name name] [--repo url] [--spec-out spec.json] [--review-out review.md]
 `);
     return;
   }

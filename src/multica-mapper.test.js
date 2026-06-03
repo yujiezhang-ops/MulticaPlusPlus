@@ -313,6 +313,179 @@ if (resource === "issue" && command === "get") {
   }
 });
 
+test("cli runs real-data spec generation, review, lock, and list for assignment, comment, and autopilot examples", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-launch-review-real-e2e-"));
+  try {
+    const mockClient = join(dir, "mock-multica.js");
+    await writeFile(mockClient, `#!/usr/bin/env node
+const [resource, command, ...rest] = process.argv.slice(2);
+function out(value) { process.stdout.write(JSON.stringify(value)); }
+if (resource === "issue" && command === "get") {
+  const issueId = rest[0];
+  out({
+    id: issueId,
+    identifier: issueId === "issue-autopilot" ? "SPA-AUTO" : issueId === "issue-comment" ? "SPA-COMMENT" : "SPA-ASSIGN",
+    title: issueId === "issue-autopilot" ? "Run scheduled repository audit" : issueId === "issue-comment" ? "Answer a review comment" : "Implement an assigned issue",
+    description: "Use real Multica data for launch review.",
+    assignee_id: "agent-1",
+    assignee_type: "agent",
+    status: "in_progress",
+    priority: "medium",
+    project_id: "project-1",
+    workspace_id: "workspace-1",
+    metadata: { milestone: "M1" },
+    created_at: "2026-06-03T08:00:00Z",
+    updated_at: "2026-06-03T09:00:00Z"
+  });
+} else if (resource === "agent" && command === "get") {
+  out({
+    id: "agent-1",
+    name: "Codex Full Access Worker",
+    provider: "custom",
+    model: "pa/gpt-5.5",
+    runtime_id: "runtime-1",
+    instructions: "Keep changes scoped and test first.",
+    custom_env: { SAFE_FLAG: "true", OPENAI_API_KEY: "do-not-emit" },
+    mcp_servers: ["filesystem"]
+  });
+} else if (resource === "runtime" && command === "list") {
+  out([{ id: "runtime-1", provider: "custom", model: "pa/gpt-5.5" }]);
+} else if (resource === "agent" && command === "skills" && rest[0] === "list") {
+  out([{ name: "test-driven-development", version: "1.0.0", permissions: ["shell:write"], risk_level: "high" }]);
+} else {
+  console.error("unexpected command", process.argv.slice(2).join(" "));
+  process.exit(1);
+}
+`);
+
+    const scenarios = [
+      {
+        name: "assignment",
+        args: ["--task-kind", "issue_assignment", "--issue-id", "issue-assignment"],
+        assertSpec(spec) {
+          assert.equal(spec.task.kind, "issue_assignment");
+          assert.equal(spec.task.issueId, "SPA-ASSIGN");
+        },
+      },
+      {
+        name: "comment",
+        args: [
+          "--task-kind",
+          "comment_mention",
+          "--issue-id",
+          "issue-comment",
+          "--trigger-comment-id",
+          "comment-1",
+          "--trigger-comment",
+          "Please verify the migration.",
+        ],
+        assertSpec(spec) {
+          assert.equal(spec.task.kind, "comment_mention");
+          assert.equal(spec.task.issueId, "SPA-COMMENT");
+          assert.equal(spec.task.triggerCommentId, "comment-1");
+          assert.equal(spec.task.triggerComment, "Please verify the migration.");
+        },
+      },
+      {
+        name: "autopilot",
+        args: [
+          "--task-kind",
+          "autopilot",
+          "--issue-id",
+          "issue-autopilot",
+          "--autopilot-id",
+          "autopilot-1",
+          "--autopilot-run-id",
+          "run-1",
+          "--autopilot-source",
+          "schedule",
+          "--trigger-payload",
+          '{"cron":"0 9 * * 1"}',
+        ],
+        assertSpec(spec) {
+          assert.equal(spec.task.kind, "autopilot");
+          assert.equal(spec.task.issueId, "SPA-AUTO");
+          assert.equal(spec.task.autopilotId, "autopilot-1");
+          assert.equal(spec.task.autopilotRunId, "run-1");
+          assert.equal(spec.task.autopilotSource, "schedule");
+          assert.equal(spec.task.triggerPayload.source, "multica");
+          assert.equal(spec.task.triggerPayload.issue.id, "issue-autopilot");
+          assert.deepEqual(spec.task.triggerPayload.trigger, { cron: "0 9 * * 1" });
+        },
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const specPath = join(dir, `${scenario.name}-spec.json`);
+      const reviewPath = join(dir, `${scenario.name}-review.md`);
+      const ledgerPath = join(dir, `${scenario.name}-ledger.jsonl`);
+      const generate = spawnSync(
+        process.execPath,
+        [
+          "src/cli.js",
+          "from-multica",
+          ...scenario.args,
+          "--agent-id",
+          "agent-1",
+          "--cli-path",
+          mockClient,
+          "--workspace-name",
+          "MulticaPlusPlus",
+          "--repo",
+          "https://github.com/yujiezhang-ops/MulticaPlusPlus",
+          "--spec-out",
+          specPath,
+          "--review-out",
+          reviewPath,
+          "--ledger",
+          ledgerPath,
+        ],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+
+      assert.equal(generate.status, 0, generate.stderr);
+      const spec = JSON.parse(await readFile(specPath, "utf8"));
+      scenario.assertSpec(spec);
+      assert.deepEqual(validateRuntimeAgentSpec(spec).issues, []);
+      assert.equal(JSON.stringify(spec).includes("do-not-emit"), false);
+
+      const review = await readFile(reviewPath, "utf8");
+      assert.match(review, new RegExp(`Task kind: \`${spec.task.kind}\``));
+
+      const lock = spawnSync(
+        process.execPath,
+        [
+          "src/cli.js",
+          "lock",
+          "--ledger",
+          ledgerPath,
+          "--spec-id",
+          spec.specId,
+          "--approved-by",
+          "lead",
+          "--output",
+          "json",
+        ],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+      assert.equal(lock.status, 0, lock.stderr);
+
+      const list = spawnSync(
+        process.execPath,
+        ["src/cli.js", "list", "--ledger", ledgerPath, "--spec-id", spec.specId, "--output", "json"],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+      assert.equal(list.status, 0, list.stderr);
+      const records = JSON.parse(list.stdout);
+      assert.deepEqual(records.map((record) => record.status), ["draft", "locked"]);
+      assert.equal(records[0].spec.task.kind, spec.task.kind);
+      assert.equal(records[1].approvedBy, "lead");
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 async function writeFile(path, value) {
   const { writeFile: write } = await import("node:fs/promises");
   await write(path, value, "utf8");

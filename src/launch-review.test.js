@@ -415,6 +415,75 @@ test("cli locks and lists ledger records for assignment, comment, and autopilot 
   }
 });
 
+test("checked-in examples generate schema-valid specs and can be locked and listed", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-launch-review-examples-"));
+  try {
+    const examples = [
+      ["issue-assignment", "issue_assignment"],
+      ["comment-mention", "comment_mention"],
+      ["autopilot-run", "autopilot"],
+    ];
+
+    for (const [name, taskKind] of examples) {
+      const inputPath = join(process.cwd(), "examples", `${name}.json`);
+      const specPath = join(dir, `${name}-spec.json`);
+      const reviewPath = join(dir, `${name}-review.md`);
+      const ledgerPath = join(dir, `${name}-ledger.jsonl`);
+      const generate = spawnSync(
+        process.execPath,
+        [
+          "src/cli.js",
+          "--input",
+          inputPath,
+          "--spec-out",
+          specPath,
+          "--review-out",
+          reviewPath,
+          "--ledger",
+          ledgerPath,
+        ],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+
+      assert.equal(generate.status, 0, generate.stderr);
+      const spec = JSON.parse(await readFile(specPath, "utf8"));
+      assert.equal(spec.task.kind, taskKind);
+      assert.match(spec.specId, /^ras_[a-f0-9]{16}$/);
+      assert.match(await readFile(reviewPath, "utf8"), new RegExp(`Task kind: \`${taskKind}\``));
+
+      const lock = spawnSync(
+        process.execPath,
+        [
+          "src/cli.js",
+          "lock",
+          "--ledger",
+          ledgerPath,
+          "--spec-id",
+          spec.specId,
+          "--approved-by",
+          "lead",
+          "--output",
+          "json",
+        ],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+
+      assert.equal(lock.status, 0, lock.stderr);
+
+      const list = spawnSync(
+        process.execPath,
+        ["src/cli.js", "list", "--ledger", ledgerPath, "--spec-id", spec.specId, "--output", "json"],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+
+      assert.equal(list.status, 0, list.stderr);
+      assert.deepEqual(JSON.parse(list.stdout).map((record) => record.status), ["draft", "locked"]);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("cli lock rejects illegal ledger source states without appending records", async () => {
   const dir = await mkdtemp(join(tmpdir(), "multica-launch-review-cli-lock-invalid-"));
   try {
