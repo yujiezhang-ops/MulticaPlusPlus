@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -10,6 +10,55 @@ import {
   createLedgerStore,
   renderLaunchReviewMarkdown,
 } from "./launch-review.js";
+
+test("keeps launch review module boundaries explicit", async () => {
+  const publicExports = await import("./launch-review.js");
+  assert.deepEqual(Object.keys(publicExports).sort(), [
+    "buildRuntimeAgentSpec",
+    "createLedgerStore",
+    "renderLaunchReviewMarkdown",
+  ]);
+
+  for (const moduleName of ["spec", "overlay", "capability", "ledger"]) {
+    const entries = await readdir(new URL(`${moduleName}/`, import.meta.url));
+    assert.ok(entries.includes("index.js"), `${moduleName} should expose an index.js barrel`);
+  }
+
+  const ledgerIndex = await readFile(new URL("ledger/index.js", import.meta.url), "utf8");
+  assert.match(ledgerIndex, /from "\.\.\/spec\/index\.js"/);
+
+  const specExports = await import("./spec/index.js");
+  assert.deepEqual(Object.keys(specExports).sort(), [
+    "buildRuntimeAgentSpec",
+    "normalizeMcpServers",
+    "normalizePermissions",
+    "normalizeRepos",
+    "normalizeSkills",
+    "renderLaunchReviewMarkdown",
+    "schemaVersion",
+    "stableHash",
+    "stableStringify",
+  ]);
+
+  const overlayExports = await import("./overlay/index.js");
+  assert.deepEqual(Object.keys(overlayExports), ["buildInstructionOverlay"]);
+
+  const capabilityExports = await import("./capability/index.js");
+  assert.deepEqual(Object.keys(capabilityExports).sort(), [
+    "SECRET_ENV_PATTERNS",
+    "buildCapabilityReview",
+    "isSecretEnvKey",
+  ]);
+
+  const ledgerExports = await import("./ledger/index.js");
+  assert.deepEqual(Object.keys(ledgerExports).sort(), [
+    "ALLOWED_LEDGER_TRANSITIONS",
+    "assertTransition",
+    "createLedgerStore",
+    "readLedgerEvents",
+    "readLedgerText",
+  ]);
+});
 
 test("builds a reviewable runtime agent spec for an issue assignment", () => {
   const spec = buildRuntimeAgentSpec({
