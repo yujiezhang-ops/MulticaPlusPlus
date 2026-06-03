@@ -1,0 +1,43 @@
+{
+  "goal": "Answer a reviewer comment with scoped verification",
+  "task": {
+    "kind": "comment_mention",
+    "taskId": "task-2",
+    "issueId": "MUL-456",
+    "triggerCommentId": "comment-9",
+    "triggerComment": "Can you verify the migration path and report the test result?",
+    "prompt": "Verify the migration path, run the relevant tests, and reply with the outcome."
+  },
+  "workspace": {
+    "id": "ws-1",
+    "name": "Core",
+    "context": "Prefer small changes and post concise final comments.",
+    "repos": [{ "url": "https://github.com/acme/shop" }]
+  },
+  "agent": {
+    "id": "agent-1",
+    "name": "Reviewer",
+    "runtimeId": "runtime-1",
+    "provider": "codex",
+    "model": "gpt-5-codex",
+    "instructions": "Answer the triggering comment first and keep verification explicit.",
+    "skills": [
+      {
+        "name": "comment-responder",
+        "version": "1.0.0",
+        "permissions": ["repo:read", "shell:read", "issue:comment"],
+        "riskLevel": "medium"
+      }
+    ],
+    "customEnv": {
+      "SAFE_FLAG": "true"
+    },
+    "mcpServers": ["filesystem"]
+  },
+  "permissions": {
+    "tokenType": "mat_task_scoped",
+    "ttlMinutes": 1440,
+    "scopes": ["workspace:read", "issue:read", "issue:comment", "repo:read"]
+  },
+  "plan": ["Read the triggering thread", "Verify the migration path", "Post the result"]
+}
