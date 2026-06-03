@@ -197,6 +197,23 @@ test("ledger persists draft, locked, running, completed states", async () => {
   }
 });
 
+test("ledger exposes only the approved fail-closed status transitions", async () => {
+  const { ALLOWED_LEDGER_TRANSITIONS } = await import("./ledger/index.js");
+
+  assert.deepEqual(Object.keys(ALLOWED_LEDGER_TRANSITIONS).sort(), [
+    "amended",
+    "completed",
+    "draft",
+    "locked",
+    "running",
+  ]);
+  assert.deepEqual(Array.from(ALLOWED_LEDGER_TRANSITIONS.draft), ["locked"]);
+  assert.deepEqual(Array.from(ALLOWED_LEDGER_TRANSITIONS.locked), ["running"]);
+  assert.deepEqual(Array.from(ALLOWED_LEDGER_TRANSITIONS.running).sort(), ["amended", "completed"]);
+  assert.deepEqual(Array.from(ALLOWED_LEDGER_TRANSITIONS.amended), ["locked"]);
+  assert.deepEqual(Array.from(ALLOWED_LEDGER_TRANSITIONS.completed), []);
+});
+
 test("cli writes spec, review, and draft ledger from an input JSON file", async () => {
   const dir = await mkdtemp(join(tmpdir(), "multica-launch-review-cli-"));
   try {
@@ -237,6 +254,166 @@ test("cli writes spec, review, and draft ledger from an input JSON file", async 
     assert.match(review, /Launch Review: Prepare a reviewed Multica run/);
     assert.equal(ledger[0].status, "draft");
     assert.equal(ledger[0].specId, spec.specId);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli locks and lists ledger records for assignment, comment, and autopilot tasks", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-launch-review-cli-lock-"));
+  try {
+    const taskInputs = [
+      {
+        name: "assignment",
+        payload: {
+          goal: "Review an assigned issue",
+          task: { kind: "issue_assignment", taskId: "task-assignment", issueId: "MUL-100" },
+          workspace: { id: "ws-lock", name: "Lock Workspace" },
+          agent: { id: "agent-lock", name: "Lock Agent", runtimeId: "rt-lock", provider: "codex" },
+        },
+      },
+      {
+        name: "comment",
+        payload: {
+          goal: "Review a comment trigger",
+          task: {
+            kind: "comment_trigger",
+            taskId: "task-comment",
+            issueId: "MUL-101",
+            triggerCommentId: "comment-1",
+            triggerComment: "Please check this.",
+          },
+          workspace: { id: "ws-lock", name: "Lock Workspace" },
+          agent: { id: "agent-lock", name: "Lock Agent", runtimeId: "rt-lock", provider: "codex" },
+        },
+      },
+      {
+        name: "autopilot",
+        payload: {
+          goal: "Review an autopilot run",
+          task: {
+            kind: "autopilot_run",
+            taskId: "task-autopilot",
+            autopilotId: "ap-1",
+            autopilotRunId: "run-1",
+            autopilotSource: "schedule",
+          },
+          workspace: { id: "ws-lock", name: "Lock Workspace" },
+          agent: { id: "agent-lock", name: "Lock Agent", runtimeId: "rt-lock", provider: "codex" },
+        },
+      },
+    ];
+
+    for (const { name, payload } of taskInputs) {
+      const inputPath = join(dir, `${name}.json`);
+      const specPath = join(dir, `${name}-spec.json`);
+      const reviewPath = join(dir, `${name}-review.md`);
+      const ledgerPath = join(dir, `${name}-ledger.jsonl`);
+      await writeJson(inputPath, payload);
+
+      const generate = spawnSync(
+        process.execPath,
+        [
+          "src/cli.js",
+          "--input",
+          inputPath,
+          "--spec-out",
+          specPath,
+          "--review-out",
+          reviewPath,
+          "--ledger",
+          ledgerPath,
+        ],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+
+      assert.equal(generate.status, 0, generate.stderr);
+      const spec = JSON.parse(await readFile(specPath, "utf8"));
+
+      const lock = spawnSync(
+        process.execPath,
+        [
+          "src/cli.js",
+          "lock",
+          "--ledger",
+          ledgerPath,
+          "--spec-id",
+          spec.specId,
+          "--approved-by",
+          "lead",
+          "--output",
+          "json",
+        ],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+
+      assert.equal(lock.status, 0, lock.stderr);
+      assert.deepEqual(JSON.parse(lock.stdout), {
+        eventId: JSON.parse(lock.stdout).eventId,
+        specId: spec.specId,
+        status: "locked",
+        createdAt: JSON.parse(lock.stdout).createdAt,
+        approvedBy: "lead",
+      });
+
+      const list = spawnSync(
+        process.execPath,
+        ["src/cli.js", "list", "--ledger", ledgerPath, "--spec-id", spec.specId, "--output", "json"],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+
+      assert.equal(list.status, 0, list.stderr);
+      const records = JSON.parse(list.stdout);
+      assert.deepEqual(
+        records.map((record) => record.status),
+        ["draft", "locked"],
+      );
+      assert.equal(records[0].spec.task.kind, payload.task.kind);
+      assert.equal(records[1].approvedBy, "lead");
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli lock rejects illegal ledger source states without appending records", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-launch-review-cli-lock-invalid-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const store = createLedgerStore(ledgerPath);
+    const spec = buildRuntimeAgentSpec({
+      goal: "Reject a completed lock",
+      task: { kind: "issue_assignment", taskId: "task-invalid-lock", issueId: "MUL-999" },
+      workspace: { id: "ws-invalid", name: "Invalid Workspace" },
+      agent: { id: "agent-invalid", name: "Invalid Agent", runtimeId: "rt-invalid", provider: "codex" },
+    });
+
+    await store.recordDraft(spec);
+    await store.lock(spec.specId, "lead");
+    await store.markRunning(spec.specId);
+    await store.complete(spec.specId, { issueId: "MUL-999" });
+    const before = await readFile(ledgerPath, "utf8");
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        "src/cli.js",
+        "lock",
+        "--ledger",
+        ledgerPath,
+        "--spec-id",
+        spec.specId,
+        "--approved-by",
+        "lead",
+        "--output",
+        "json",
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /invalid ledger transition: completed -> locked/);
+    assert.equal(await readFile(ledgerPath, "utf8"), before);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
