@@ -881,7 +881,7 @@ pre {
   background: #d7dbe2;
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 1180px) {
   #view-control {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -9,6 +9,19 @@ skill registry, or autopilot system. It generates a reviewable Runtime Agent
 Spec before a task is launched, so a user can inspect the goal, runtime, skills,
 instruction overlays, capabilities, permission scopes, and initial plan.
 
+## Local GUI Prototype
+
+This branch also includes a static GUI-first prototype at `gui/index.html`.
+It is a local mock control console for reviewing `Goal`, `Plan`, and
+one-click agent permission setup before real integration work.
+
+The prototype is intentionally limited:
+
+- It uses mock data only.
+- It does not call the `multica` CLI.
+- It does not write Multica metadata or create issues.
+- It does not add a frontend build chain or runtime dependency.
+
 ## What It Produces
 
 - `Runtime Agent Spec`: a stable JSON snapshot for one agent run.
