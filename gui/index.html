@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MulticaPlusPlus</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div id="app-shell">
+      <aside id="sidebar" aria-label="Primary navigation">
+        <nav>
+          <button type="button" data-nav-target="control" aria-current="page">Control</button>
+          <button type="button" data-nav-target="permissions" aria-controls="permission-panel">Permissions</button>
+          <button type="button" data-nav-target="activity" aria-controls="activity-view">Activity</button>
+          <button type="button" data-nav-target="records" aria-controls="records-view">Records</button>
+          <button type="button" data-nav-target="settings" aria-controls="settings-view">Settings</button>
+        </nav>
+      </aside>
+
+      <div class="workspace">
+        <header id="topbar">
+          <div class="topbar-title">MulticaPlusPlus</div>
+          <div class="topbar-context" aria-label="Run context">
+            <span class="context-item">
+              <span class="context-label">agent</span>
+              <span id="agent-value" class="context-value">unassigned</span>
+            </span>
+            <span class="context-item">
+              <span class="context-label">runtime</span>
+              <span id="runtime-value" class="context-value">local</span>
+            </span>
+            <span class="context-item">
+              <span class="context-label">run status</span>
+              <span id="run-status-value" class="context-value">idle</span>
+            </span>
+          </div>
+          <button type="button" id="configure-agent-permissions" data-action="open-permissions">
+            Configure Agent Permissions
+          </button>
+        </header>
+
+        <main class="views">
+          <section id="view-control" class="control-grid" data-view="control">
+            <section id="goal-panel" class="panel" aria-labelledby="goal-heading">
+              <header class="panel-header">
+                <h1 id="goal-heading">Goal</h1>
+                <div class="panel-actions">
+                  <button type="button" id="restore-goal">Restore</button>
+                  <button type="button" id="resume-goal">Resume</button>
+                </div>
+              </header>
+              <div id="goal-summary" class="dynamic-region" aria-live="polite"></div>
+            </section>
+
+            <section id="plan-panel" class="panel" aria-labelledby="plan-heading">
+              <header class="panel-header">
+                <h1 id="plan-heading">Plan</h1>
+                <div id="plan-filter-bar" class="plan-filters" aria-label="Plan status filters">
+                  <button type="button" data-plan-filter="all" aria-pressed="true">All</button>
+                  <button type="button" data-plan-filter="pending">Pending</button>
+                  <button type="button" data-plan-filter="running">Running</button>
+                  <button type="button" data-plan-filter="done">Done</button>
+                  <button type="button" data-plan-filter="blocked">Blocked</button>
+                </div>
+              </header>
+              <ol id="plan-list" class="dynamic-region" aria-live="polite"></ol>
+            </section>
+
+            <section id="permission-panel" class="panel" aria-labelledby="permission-heading">
+              <header class="panel-header">
+                <h1 id="permission-heading">Agent Permission Setup</h1>
+              </header>
+              <div id="permission-template-bar" class="permission-templates" aria-label="Permission templates"></div>
+              <label class="field">
+                <span>TTL lease</span>
+                <select id="permission-ttl" data-permission-ttl="true"></select>
+              </label>
+              <label class="field checkbox-field">
+                <input id="permission-approval-required" type="checkbox" checked>
+                <span>Approval required</span>
+              </label>
+              <div id="permission-summary" class="dynamic-region" aria-live="polite"></div>
+              <div id="permission-scopes" class="dynamic-region" aria-live="polite"></div>
+              <div id="permission-risk" class="dynamic-region" aria-live="polite"></div>
+              <div class="permission-actions">
+                <button type="button" id="preview-permission-configuration" data-action="preview-permission">
+                  Preview Configuration
+                </button>
+                <button type="button" id="apply-permissions" data-action="apply-permission">Apply Permissions</button>
+              </div>
+            </section>
+          </section>
+
+          <section id="activity-view" class="placeholder-view" data-view="activity" hidden>
+            <header class="view-header">
+              <h1>Activity</h1>
+            </header>
+            <div id="activity-feed" class="dynamic-region" aria-live="polite"></div>
+          </section>
+
+          <section id="records-view" class="placeholder-view" data-view="records" hidden>
+            <header class="view-header">
+              <h1>Records</h1>
+            </header>
+            <div id="records-list" class="dynamic-region" aria-live="polite"></div>
+          </section>
+
+          <section id="settings-view" class="placeholder-view" data-view="settings" hidden>
+            <header class="view-header">
+              <h1>Settings</h1>
+            </header>
+            <div id="settings-panel" class="dynamic-region" aria-live="polite"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
