@@ -112,9 +112,11 @@ Plan 栏用于回答“agent 准备如何完成目标，以及现在进行到哪
   Incident 等通用场景。
 - 团队预制体：团队成员从共同工作环境创建，带创建者、适用场景和默认配置。
 
-用户点击预制体后，可以修改默认 Agent 名称和 instructions，再 Preview dry-run
-计划或创建 Multica Agent。MCP 和 secret env 在第一版只展示为配置提示和阻断项，
-不声明已经写入。Squad 预制体先保留为后续扩展。
+第一版 GUI server 支持创建当前会话内的团队预制体，不写 Multica metadata，
+不写仓库文件，也不持久化。用户点击预制体后，可以修改默认 Agent 名称和
+instructions，再 Preview dry-run 计划或创建 Multica Agent。MCP 和 secret env
+在第一版只展示为配置提示和阻断项，不声明已经写入。Squad 预制体先保留为后续
+扩展。
 
 ## 6. GUI 信息架构
 

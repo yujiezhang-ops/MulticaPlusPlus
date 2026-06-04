@@ -10,6 +10,7 @@ import {
 } from "./agent-config.js";
 import {
   buildAgentConfigPlanFromPreset,
+  buildTeamPresetFromEnvironment,
   listAgentPresets,
   mergePresetOverrides,
 } from "./agent-preset.js";
@@ -31,6 +32,7 @@ export async function createGuiServer({
   exec,
 } = {}) {
   const root = resolve(guiDir);
+  const sessionTeamPresets = [];
   const server = createServer(async (request, response) => {
     try {
       if (request.method === "POST" && request.url === "/api/agent-config/image2/create") {
@@ -46,7 +48,11 @@ export async function createGuiServer({
         return;
       }
       if (request.method === "GET" && request.url === "/api/agent-presets") {
-        sendJson(response, 200, { ok: true, presets: listAgentPresets() });
+        sendJson(response, 200, { ok: true, presets: listSessionPresets(sessionTeamPresets) });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/agent-presets") {
+        await handleTeamPresetCreate({ request, response, sessionTeamPresets });
         return;
       }
       const presetMatch = request.url?.match(/^\/api\/agent-presets\/([^/]+)\/(plan|create)$/);
@@ -59,6 +65,7 @@ export async function createGuiServer({
           discoveryTimeoutMs,
           discoveryRetries,
           exec,
+          sessionTeamPresets,
           presetId: decodeURIComponent(presetMatch[1]),
           action: presetMatch[2],
         });
@@ -149,6 +156,7 @@ async function handlePresetAction({
   discoveryTimeoutMs,
   discoveryRetries,
   exec,
+  sessionTeamPresets,
   presetId,
   action,
 }) {
@@ -161,7 +169,7 @@ async function handlePresetAction({
     return;
   }
 
-  const basePreset = listAgentPresets().find((preset) => preset.id === presetId);
+  const basePreset = listSessionPresets(sessionTeamPresets).find((preset) => preset.id === presetId);
   if (!basePreset) {
     sendJson(response, 404, { ok: false, error: `unknown preset: ${presetId}` });
     return;
@@ -215,6 +223,24 @@ async function handlePresetAction({
     plan: summarizePlan(plan),
     result,
   });
+}
+
+async function handleTeamPresetCreate({ request, response, sessionTeamPresets }) {
+  const body = await readJsonBody(request);
+  const preset = buildTeamPresetFromEnvironment({
+    ...body,
+    source: "team",
+    target: "agent",
+  });
+  sessionTeamPresets.push(preset);
+  sendJson(response, 201, { ok: true, preset });
+}
+
+function listSessionPresets(sessionTeamPresets) {
+  return [
+    ...listAgentPresets(),
+    ...sessionTeamPresets,
+  ];
 }
 
 async function serveStatic({ request, response, root }) {

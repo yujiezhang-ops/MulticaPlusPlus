@@ -81,8 +81,10 @@ npm run gui
 - 把审计记录追加到 `out/agent-config-events.jsonl`。
 
 也可以直接在左侧 `Plugin Presets` / `Team Presets` 中选择预制体，修改默认配置
-后点击 `Preview Plan` 或 `Create Agent`。当前真实创建范围是 Multica Agent；
-Squad 预制体先作为后续扩展。
+后点击 `Preview Plan` 或 `Create Agent`。弹层内的 `Create Team Preset` 可以基于
+团队共同本地环境创建一个当前 GUI server 会话内的团队预制体；它不写 Multica
+metadata，也不持久化到仓库文件。当前真实创建范围是 Multica Agent；Squad 预制体
+先作为后续扩展。
 
 用示例 JSON 生成审阅材料：
 

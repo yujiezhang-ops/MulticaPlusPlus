@@ -178,6 +178,103 @@ test("GUI renders plugin and team presets, previews an edited preset, and create
   assert.ok(clickLog.includes("data-action:create-selected-preset-agent"));
 });
 
+test("GUI creates a team preset and refreshes the preset list", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document, clickLog } = createTinyDocument();
+  const fetchCalls = [];
+  const presets = [
+    {
+      id: "planner",
+      source: "plugin",
+      target: "agent",
+      name: "Planner Agent",
+      description: "Plan work.",
+      role: "Plan owner",
+      createdBy: "Multica++",
+      useCases: ["planning"],
+      agent: {
+        name: "Multica++ Planner Agent",
+        description: "Planner",
+        instructions: "Plan carefully.",
+        model: "pa/gpt-5.5",
+        runtimeHint: "local-codex",
+        visibility: "private",
+        maxConcurrentTasks: 1,
+      },
+      skills: [{ name: "launch-review" }],
+      mcpServers: [],
+      permissions: { scopes: ["workspace:read"], ttl: "1 hour", approvalRequired: true, riskLevel: "low" },
+      environment: [],
+      guardrails: ["dry-run first"],
+    },
+  ];
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets" && options.method === "POST") {
+        const body = JSON.parse(options.body);
+        const preset = {
+          id: "team-image-review-agent",
+          source: "team",
+          target: "agent",
+          name: body.name,
+          description: body.description,
+          role: body.role,
+          createdBy: body.createdBy,
+          useCases: ["team preset"],
+          agent: {
+            name: body.name,
+            description: body.description,
+            instructions: body.agent.instructions,
+            model: body.agent.model,
+            runtimeHint: body.agent.runtimeHint,
+            visibility: "private",
+            maxConcurrentTasks: 1,
+          },
+          skills: body.skills,
+          mcpServers: body.mcpServers,
+          permissions: body.permissions,
+          environment: body.environment,
+          guardrails: body.guardrails,
+        };
+        presets.push(preset);
+        return responseJson({ ok: true, preset });
+      }
+      if (url === "/api/agent-presets") {
+        return responseJson({ ok: true, presets });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.textContent().includes("Planner Agent"));
+
+  document.querySelector("#new-preset-name").value = "Team Image Review Agent";
+  document.querySelector("#new-preset-created-by").value = "DesignOps";
+  document.querySelector("#new-preset-description").value = "Review generated image concepts before sharing.";
+  document.querySelector("#new-preset-instructions").value = "Review generated images for quality and launch risk.";
+
+  const createButton = document.querySelector("[data-action='create-team-preset']");
+  createButton.dispatchEvent({ type: "click", target: createButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const createCall = fetchCalls.find((call) => call.url === "/api/agent-presets" && call.options.method === "POST");
+  assert.ok(createCall, "team preset create endpoint should be called");
+  const requestBody = JSON.parse(createCall.options.body);
+  assert.equal(requestBody.name, "Team Image Review Agent");
+  assert.equal(requestBody.createdBy, "DesignOps");
+  assert.ok(document.textContent().includes("Team Image Review Agent"));
+  assert.ok(document.textContent().includes("Team preset created"));
+  assert.ok(clickLog.includes("data-action:create-team-preset"));
+});
+
 function responseJson(value) {
   return {
     ok: true,
@@ -225,7 +322,7 @@ function createTinyDocument() {
       return [];
     },
     textContent() {
-      return Array.from(nodes.values()).map((node) => node.textContentDeep()).join("\n");
+      return Array.from(nodes.values()).filter(Boolean).map((node) => node.textContentDeep()).join("\n");
     },
   };
 
@@ -258,6 +355,11 @@ function createTinyDocument() {
     "#preset-config-summary",
     "#preset-status",
     "#preset-feedback",
+    "#new-preset-name",
+    "#new-preset-created-by",
+    "#new-preset-description",
+    "#new-preset-instructions",
+    "#new-preset-feedback",
   ];
   selectors.forEach((selector) => {
     const node = element(selector.replace(/^[#.]/, "div"));
@@ -269,10 +371,12 @@ function createTinyDocument() {
   nodes.set("[data-action='open-agent-config']", actionButton("open-agent-config"));
   nodes.set("[data-action='preview-selected-preset']", actionButton("preview-selected-preset"));
   nodes.set("[data-action='create-selected-preset-agent']", actionButton("create-selected-preset-agent"));
+  nodes.set("[data-action='create-team-preset']", actionButton("create-team-preset"));
   nodes.set("[data-action='create-image2-agent']", null);
   document.body.appendChild(nodes.get("[data-action='open-agent-config']"));
   document.body.appendChild(nodes.get("[data-action='preview-selected-preset']"));
   document.body.appendChild(nodes.get("[data-action='create-selected-preset-agent']"));
+  document.body.appendChild(nodes.get("[data-action='create-team-preset']"));
 
   function actionButton(action) {
     const node = element("button");

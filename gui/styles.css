@@ -1215,6 +1215,22 @@ p {
   gap: 10px;
 }
 
+.team-preset-create {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.team-preset-create h3 {
+  font-size: 16px;
+}
+
+.team-preset-create .outline-button {
+  width: 100%;
+}
+
 .preset-option {
   display: grid;
   gap: 6px;

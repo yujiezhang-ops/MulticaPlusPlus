@@ -192,6 +192,30 @@
           <section class="agent-config-presets" aria-labelledby="agent-config-presets-heading">
             <h2 id="agent-config-presets-heading">Preset</h2>
             <div id="agent-config-presets" class="preset-list" aria-live="polite"></div>
+            <section class="team-preset-create" aria-labelledby="team-preset-create-heading">
+              <h3 id="team-preset-create-heading">Create Team Preset</h3>
+              <label class="preset-edit-field">
+                <span>Preset Name</span>
+                <input id="new-preset-name" type="text" value="Team Image Review Agent">
+              </label>
+              <label class="preset-edit-field">
+                <span>Created By</span>
+                <input id="new-preset-created-by" type="text" value="PPIO Team">
+              </label>
+              <label class="preset-edit-field">
+                <span>Description</span>
+                <input id="new-preset-description" type="text" value="Team preset generated from the shared local Codex environment.">
+              </label>
+              <label class="preset-edit-field">
+                <span>Instructions</span>
+                <textarea id="new-preset-instructions" rows="4">Follow the team's shared local Codex workflow. Preview the plan first, keep secrets out of logs, and run verification before reporting completion.</textarea>
+              </label>
+              <button type="button" class="outline-button" data-action="create-team-preset">
+                <span class="button-icon nav-icon-agent" aria-hidden="true"></span>
+                <span>Create Team Preset</span>
+              </button>
+              <p id="new-preset-feedback" class="preset-feedback">Creates a session-local team preset. It does not write Multica metadata.</p>
+            </section>
           </section>
 
           <section class="agent-config-preview" aria-labelledby="agent-config-preview-heading">

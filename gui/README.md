@@ -81,6 +81,9 @@ Codex Agent` preset 还提供 `Create Image2 Codex Agent`，通过本地 GUI ser
 
 预制体包含 skills、MCP、instructions、runtime hint、权限、TTL、审批策略和
 环境配置路径提示。MCP 和 secret env 目前只展示和记录阻断项，不直接写入。
+弹层内的 `Create Team Preset` 会创建一个当前 GUI server 会话内的团队预制体，
+并刷新左侧 `Team Presets`。它不调用 Multica CLI，不写 Multica metadata，也不
+持久化到仓库文件；重启 server 后需要重新创建。
 
 ## 本地交互
 
@@ -88,6 +91,8 @@ Codex Agent` preset 还提供 `Create Image2 Codex Agent`，通过本地 GUI ser
 - 点击 `一键配置 Agent` 打开本地配置弹层。
 - 默认选择 `Image2 Codex Agent` preset，也可以切换 Planner / Review /
   Incident 等 preset。
+- `Create Team Preset` 会基于表单中的名称、创建者、说明和 instructions 创建
+  当前会话的团队预制体。
 - 左侧预制体点击后会打开编辑器，支持修改 Agent Name 和 Instructions。
 - `Preview Plan` 会调用 `/api/agent-presets/:id/plan`，生成 dry-run 计划。
 - `Create Agent` 会调用 `/api/agent-presets/:id/create`，带确认 token 后真实

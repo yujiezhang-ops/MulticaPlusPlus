@@ -9,7 +9,8 @@
 ## 用户旅程
 
 1. 用户进入 Multica++，左侧看到两组预制体：插件预制体、团队预制体。
-2. 用户点击一个预制体。
+2. 用户可以点击已有预制体，也可以用 `Create Team Preset` 基于团队共同本地
+   环境创建一个团队预制体。
 3. 主区域展示该预制体的默认配置，包括用途、runtime、model、skills、MCP、
    instructions、权限 scope、TTL、审批要求和环境配置路径提示。
 4. 用户按当前任务修改默认值。
@@ -21,6 +22,10 @@
 
 - 插件预制体：随 Multica++ 提供，适合通用工作流。
 - 团队预制体：从团队共同环境沉淀，带创建者、适用场景和环境路径说明。
+
+第一版 GUI server 支持创建当前会话内的团队预制体。该能力不写 Multica metadata，
+不写仓库文件，也不持久化；重启 server 后需要重新创建。后续如需共享给团队，
+再接入文件化模板或 Multica/外部存储。
 
 第一版预制体：
 
@@ -84,6 +89,7 @@ Multica 当前 CLI 可真实写入：
 
 按钮：
 
+- `Create Team Preset`：基于表单创建当前会话内的团队预制体，不写 Multica。
 - `Preview Plan`：dry-run，不写 Multica。
 - `Create Agent`：确认后通过本地 GUI server 真实写 Multica。
 - `Create Squad`：第一版禁用或仅记录预览。

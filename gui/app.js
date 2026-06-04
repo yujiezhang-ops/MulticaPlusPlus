@@ -669,6 +669,10 @@
     if (modal) modal.hidden = !state.agentConfigOpen;
     if (status) status.textContent = state.agentConfigStatus;
     if (feedback) feedback.textContent = state.agentConfigFeedback;
+    const newPresetFeedback = qs("#new-preset-feedback");
+    if (newPresetFeedback && !newPresetFeedback.textContent) {
+      newPresetFeedback.textContent = "Creates a session-local team preset. It does not write Multica metadata.";
+    }
 
     if (presetList) {
       clear(presetList);
@@ -849,6 +853,8 @@
         previewSelectedPreset();
       } else if (kind === "create-selected-preset-agent") {
         createSelectedPresetAgent();
+      } else if (kind === "create-team-preset") {
+        createTeamPreset();
       } else if (kind === "apply-agent-config") {
         const preset = currentAgentPreset();
         state.agentConfigStatus = "Applied locally";
@@ -1020,6 +1026,65 @@
       }
     } catch {
       // Direct file mode uses local fallback presets.
+    }
+  }
+
+  async function createTeamPreset() {
+    const feedback = qs("#new-preset-feedback");
+    const name = qs("#new-preset-name")?.value?.trim() || "Team Agent Preset";
+    const createdBy = qs("#new-preset-created-by")?.value?.trim() || "Team";
+    const description = qs("#new-preset-description")?.value?.trim() || `${name} generated from the shared local environment.`;
+    const instructions = qs("#new-preset-instructions")?.value?.trim() || "Preview the plan first and keep secrets out of logs.";
+    if (feedback) feedback.textContent = `Creating ${name}...`;
+
+    try {
+      const response = await fetch("/api/agent-presets", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          createdBy,
+          description,
+          role: "Team configured agent",
+          useCases: ["team preset", "shared local environment"],
+          agent: {
+            instructions,
+            model: "pa/gpt-5.5",
+            runtimeHint: "local-codex",
+            maxConcurrentTasks: 1
+          },
+          skills: [
+            { name: "launch-review", description: "Review launch artifacts." }
+          ],
+          mcpServers: [
+            { name: "filesystem", purpose: "Read local workspace files.", required: true }
+          ],
+          permissions: {
+            scopes: ["workspace:read", "repo:read", "test:run"],
+            ttl: "1 hour",
+            approvalRequired: true,
+            riskLevel: "medium"
+          },
+          environment: [
+            { key: "OPENAI_API_KEY", pathHint: "%USERPROFILE%\\.codex\\auth.json or process env", required: false }
+          ],
+          guardrails: ["preview first", "no secret logging", "human confirmation before writes"]
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Team preset creation failed.");
+      await loadPresetLibrary();
+      state.selectedPresetId = payload.preset.id;
+      state.agentConfigOpen = true;
+      state.presetStatus = "Draft";
+      state.presetFeedback = `${payload.preset.name} selected. Edit defaults, then preview or create.`;
+      if (feedback) feedback.textContent = `Team preset created: ${payload.preset.name}`;
+      appendRecord("Team preset created", `${payload.preset.name} was created in the local GUI session.`);
+      renderAll();
+    } catch (error) {
+      if (feedback) feedback.textContent = error.message || String(error);
+      appendRecord("Team preset creation failed", error.message || String(error));
+      renderAll();
     }
   }
 

@@ -192,6 +192,64 @@ test("gui server uses a bounded discovery timeout for preset create failures", a
   }
 });
 
+test("gui server creates a team preset in the current local server session", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-team-preset-"));
+  try {
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath: join(dir, "audit.jsonl"),
+      exec: async () => {
+        throw new Error("team preset creation should not call multica");
+      },
+    });
+
+    try {
+      const createResponse = await fetch(`http://127.0.0.1:${server.port}/api/agent-presets`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Team Image Review Agent",
+          createdBy: "DesignOps",
+          description: "Review generated image concepts before sharing.",
+          role: "Image review",
+          agent: {
+            instructions: "Review generated image concepts for quality, consistency, and launch risk.",
+            model: "pa/gpt-5.5",
+            runtimeHint: "local-codex",
+          },
+          skills: [{ name: "paigod-imagegen" }],
+          mcpServers: [{ name: "filesystem", purpose: "Read local assets.", required: true }],
+          permissions: {
+            scopes: ["workspace:read", "asset:read"],
+            ttl: "1 hour",
+            approvalRequired: true,
+            riskLevel: "medium",
+          },
+          environment: [{ key: "OPENAI_API_KEY", pathHint: "%USERPROFILE%\\.codex\\auth.json", required: true }],
+          guardrails: ["preview first", "no secret logging"],
+        }),
+      });
+
+      assert.equal(createResponse.status, 201);
+      const createPayload = await createResponse.json();
+      assert.equal(createPayload.ok, true);
+      assert.equal(createPayload.preset.source, "team");
+      assert.equal(createPayload.preset.name, "Team Image Review Agent");
+      assert.equal(JSON.stringify(createPayload).includes("sk-"), false);
+
+      const listResponse = await fetch(`http://127.0.0.1:${server.port}/api/agent-presets`);
+      const listPayload = await listResponse.json();
+      assert.ok(listPayload.presets.some((preset) => preset.id === createPayload.preset.id));
+      assert.ok(listPayload.presets.some((preset) => preset.name === "Team Image Review Agent"));
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("gui server lists presets and creates an agent from an edited team preset", async () => {
   const dir = await mkdtemp(join(tmpdir(), "multica-gui-preset-"));
   try {
