@@ -10,6 +10,12 @@ import {
   renderLaunchReviewMarkdown,
 } from "./launch-review.js";
 import { createMulticaClient } from "./multica-client.js";
+import {
+  applyAgentConfigPlan,
+  buildAgentConfigPlan,
+  discoverMulticaEnvironment,
+  renderAgentConfigPlanMarkdown,
+} from "./agent-config.js";
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -37,6 +43,10 @@ async function main() {
       process.exit(args.help ? 0 : 1);
     }
     await generateFromMultica(args);
+    return;
+  }
+  if (command === "agent-config") {
+    await handleAgentConfig(args);
     return;
   }
   if (command !== "generate") {
@@ -104,6 +114,58 @@ async function generateFromMultica(args) {
   }
 }
 
+async function handleAgentConfig(args) {
+  const action = args._?.[0] ?? "plan";
+  if (args.help) {
+    printHelp(`agent-config:${action}`);
+    process.exit(0);
+  }
+
+  const environment = await discoverMulticaEnvironment({
+    cliPath: args.cliPath,
+    workspaceName: args.workspaceName,
+    projectTitle: args.projectTitle,
+    sourceAgentName: args.sourceAgentName,
+  });
+
+  if (action === "discover") {
+    writeJsonOrText(environment, args.output);
+    return;
+  }
+
+  const plan = buildAgentConfigPlan({
+    environment,
+    presetId: args.preset,
+    mode: args.mode,
+  });
+
+  if (args.planOut) {
+    await writeArtifact(args.planOut, JSON.stringify(plan, null, 2) + "\n");
+  }
+  if (args.reviewOut) {
+    await writeArtifact(args.reviewOut, renderAgentConfigPlanMarkdown(plan));
+  }
+
+  if (action === "plan") {
+    if (!args.planOut && !args.reviewOut) {
+      writeJsonOrText(args.output === "json" ? plan : renderAgentConfigPlanMarkdown(plan), args.output);
+    }
+    return;
+  }
+
+  if (action !== "apply") {
+    throw new Error(`unknown agent-config action: ${action}`);
+  }
+
+  const result = await applyAgentConfigPlan({
+    plan,
+    cliPath: args.cliPath,
+    execute: Boolean(args.execute),
+    confirm: args.confirm,
+  });
+  writeJsonOrText(result, args.output);
+}
+
 function writeDegradationToStderr({ warnings = [], errors = [] }) {
   if (warnings.length) {
     process.stderr.write(`Degradation warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}\n`);
@@ -149,6 +211,19 @@ function writeOutput(value, output = "text") {
   process.stdout.write(formatLedgerEvent(value) + "\n");
 }
 
+function writeJsonOrText(value, output = "text") {
+  if (output === "json") {
+    process.stdout.write(typeof value === "string" ? value : JSON.stringify(value, null, 2) + "\n");
+    return;
+  }
+  if (typeof value === "string") {
+    process.stdout.write(value);
+    if (!value.endsWith("\n")) process.stdout.write("\n");
+    return;
+  }
+  process.stdout.write(JSON.stringify(value, null, 2) + "\n");
+}
+
 function formatLedgerEvent(event) {
   return [event.createdAt, event.specId, event.status].filter(Boolean).join("\t");
 }
@@ -158,6 +233,11 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
+      case "discover":
+      case "plan":
+      case "apply":
+        parsed._ = appendArg(parsed._, arg);
+        break;
       case "--help":
       case "-h":
         parsed.help = true;
@@ -201,6 +281,30 @@ function parseArgs(argv) {
         break;
       case "--workspace-name":
         parsed.workspaceName = argv[++index];
+        break;
+      case "--project-title":
+        parsed.projectTitle = argv[++index];
+        break;
+      case "--source-agent-name":
+        parsed.sourceAgentName = argv[++index];
+        break;
+      case "--preset":
+        parsed.preset = argv[++index];
+        break;
+      case "--mode":
+        parsed.mode = argv[++index];
+        if (!["create", "update"].includes(parsed.mode)) {
+          throw new Error(`unsupported mode: ${parsed.mode}`);
+        }
+        break;
+      case "--plan-out":
+        parsed.planOut = argv[++index];
+        break;
+      case "--execute":
+        parsed.execute = true;
+        break;
+      case "--confirm":
+        parsed.confirm = argv[++index];
         break;
       case "--repo":
         parsed.repo = appendArg(parsed.repo, argv[++index]);
@@ -262,6 +366,23 @@ function buildTaskArgs(args) {
 }
 
 function printHelp(command = "generate") {
+  if (command.startsWith("agent-config")) {
+    process.stdout.write(`multica-launch-review agent-config
+
+Discover, plan, or apply a one-click Multica agent configuration.
+
+Usage:
+  multica-launch-review agent-config discover [--output json]
+  multica-launch-review agent-config plan [--preset planner|review|incident] [--plan-out plan.json] [--review-out plan.md]
+  multica-launch-review agent-config apply [--preset planner|review|incident] [--output json]
+  multica-launch-review agent-config apply --execute --confirm APPLY-MULTICA-AGENT-CONFIG
+
+Safety:
+  apply defaults to dry-run. Real Multica writes require --execute and the confirmation token.
+  custom_env writes are excluded by design; use multica agent env set --custom-env-file or --custom-env-stdin separately after human approval.
+`);
+    return;
+  }
   if (command === "from-multica") {
     process.stdout.write(`multica-launch-review from-multica
 

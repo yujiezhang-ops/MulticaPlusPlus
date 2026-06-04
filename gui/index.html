@@ -183,7 +183,7 @@
       <section class="agent-config-dialog">
         <header class="modal-header">
           <div>
-            <span class="section-label">Local prototype</span>
+            <span class="section-label">Local preview + CLI execution</span>
             <h1 id="agent-config-heading">一键配置 Agent</h1>
           </div>
           <button type="button" class="modal-close" data-action="close-agent-config" aria-label="Close one-click agent configuration">×</button>
@@ -205,7 +205,7 @@
         </div>
 
         <footer class="modal-actions">
-          <p id="agent-config-feedback">Preview is local only. No Multica CLI command or metadata write will run.</p>
+          <p id="agent-config-feedback">Preview is local in the browser. Real Multica writes must run through the CLI with an explicit confirmation token.</p>
           <div class="modal-button-row">
             <button type="button" class="outline-button" data-action="preview-agent-config">
               <span class="button-icon nav-icon-eye" aria-hidden="true"></span>
@@ -213,7 +213,7 @@
             </button>
             <button type="button" class="primary-button" data-action="apply-agent-config">
               <span class="button-icon nav-icon-agent" aria-hidden="true"></span>
-              <span>Apply Local Mock</span>
+              <span>Apply Browser Preview</span>
             </button>
           </div>
         </footer>

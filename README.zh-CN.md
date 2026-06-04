@@ -25,8 +25,9 @@ Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica
 
 ## GUI-first 方向
 
-当前产品优先级已经调整为先完成插件控制台，再按界面补齐功能。首版 GUI 使用
-本地 mock 数据，不接真实 Multica CLI，不写 Multica metadata。
+当前产品优先级已经调整为先完成插件控制台，再按界面补齐功能。首版 GUI 的
+浏览器页面仍使用本地预览数据，不会直接执行本机命令；真实 Multica Agent
+配置通过仓库内 CLI 桥完成。
 
 首屏只突出三栏：
 
@@ -43,7 +44,8 @@ Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica
 项目、agent、run、environment 或 data 管理能力。真实产品能力仍收敛在三栏：
 `Goal`、`Plan` 和 `Agent Permission Setup`。
 `一键配置 Agent` 当前只做 preset 选择、配置预览、mock 应用和页面记录反馈，
-不创建或修改真实 Multica agent。
+不直接创建或修改真实 Multica agent。弹层会展示对应的真实 CLI 命令，用户在
+终端中执行 dry-run 或显式确认后才会写入 Multica。
 
 ## 快速开始
 
@@ -81,6 +83,35 @@ node src/cli.js from-multica \
   --review-out out/review.md
 ```
 
+一键配置 Agent 的真实 CLI 流程：
+
+```bash
+# 只读探测本地 Multica daemon、workspace、project、runtime、agent、skills
+node src/cli.js agent-config discover --output json
+
+# 生成配置计划，不写 Multica
+node src/cli.js agent-config plan \
+  --preset planner \
+  --plan-out out/agent-config-plan.json \
+  --review-out out/agent-config-plan.md
+
+# dry-run apply：默认只显示将执行的写操作
+node src/cli.js agent-config apply --preset planner --output json
+
+# 真实执行：必须显式传入确认 token
+node src/cli.js agent-config apply \
+  --preset planner \
+  --execute \
+  --confirm APPLY-MULTICA-AGENT-CONFIG \
+  --output json
+```
+
+当前本地默认会选择 `SparkProject` workspace、`MulticaPlusPlus` project、
+`Codex Full Access Worker` 作为源配置，并使用在线的 Codex runtime。
+如果 workspace 里没有匹配的 skill，计划会记录 `missing:skills:*` 并跳过
+skill 分配；不会伪造成功。`custom_env` 写入被设计为阻断项，必须在人工确认后
+用 `multica agent env set --custom-env-file` 或 `--custom-env-stdin` 单独处理。
+
 锁定并列出 ledger：
 
 ```bash
@@ -100,6 +131,7 @@ node src/cli.js list --ledger out/ledger.jsonl --output json
 - `src/ledger/`：Goal/Plan Ledger Lite。
 - `src/multica-client.js`：Multica CLI 只读 adapter。
 - `src/multica-mapper.js`：真实 Multica 数据到 Runtime Agent Spec 的映射。
+- `src/agent-config.js`：一键配置 Agent 的 Multica CLI 探测、计划和受控执行。
 - `examples/`：issue assignment、comment mention、autopilot run 示例输入。
 - `ops/monitoring/`：本地监控记录、更新日志、快照和备份目录。
 

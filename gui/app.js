@@ -89,9 +89,10 @@
         runtime: "local-docker",
         permissionTemplate: "Backend Development (Default)",
         ttl: "2 hours",
+        cliPreset: "planner",
         skills: ["launch-review", "plan-ledger", "permission-preview"],
         scopes: ["workspace:read", "repo:read", "issue:comment", "permission:preview"],
-        guardrails: ["approval required", "no metadata writes", "mock apply only"],
+        guardrails: ["dry-run first", "human confirmation", "no secret env writes"],
         summary: "Best for turning a goal into staged plan steps and permission previews."
       },
       {
@@ -102,9 +103,10 @@
         runtime: "static-browser",
         permissionTemplate: "Review Only",
         ttl: "30 minutes",
+        cliPreset: "review",
         skills: ["diff-review", "risk-summary", "records-check"],
         scopes: ["workspace:read", "records:read", "permission:preview"],
-        guardrails: ["read-only", "short lease", "human confirmation"],
+        guardrails: ["dry-run first", "read-only intent", "human confirmation"],
         summary: "Best for checking goal, plan, and permission risk before applying a run setup."
       },
       {
@@ -115,12 +117,19 @@
         runtime: "local-docker",
         permissionTemplate: "Incident Read Window",
         ttl: "15 minutes",
+        cliPreset: "incident",
         skills: ["activity-scan", "blocked-reason", "recovery-note"],
         scopes: ["activity:read", "records:read", "runtime:read"],
-        guardrails: ["time boxed", "no secret writes", "local event only"],
+        guardrails: ["dry-run first", "time boxed", "no secret env writes"],
         summary: "Best for inspecting blocked plan steps and preparing a recovery note."
       }
     ],
+    cliConfig: {
+      confirmationToken: "APPLY-MULTICA-AGENT-CONFIG",
+      discover: "node src/cli.js agent-config discover --output json",
+      planOut: "out/agent-config-plan.json",
+      reviewOut: "out/agent-config-plan.md"
+    },
     records: [
       {
         time: "2026-06-04 15:00",
@@ -146,7 +155,7 @@
     agentConfigOpen: false,
     agentPresetId: "planner",
     agentConfigStatus: "Draft",
-    agentConfigFeedback: "Preview is local only. No Multica CLI command or metadata write will run.",
+    agentConfigFeedback: "Preview is local in the browser. Real Multica writes must run through the CLI with an explicit confirmation token.",
     records: mockData.records.slice()
   };
 
@@ -553,6 +562,34 @@
     preview.appendChild(configList("Skills", preset.skills));
     preview.appendChild(configList("Scopes", preset.scopes));
     preview.appendChild(configList("Guardrails", preset.guardrails));
+    preview.appendChild(renderCliPlan(preset));
+  }
+
+  function renderCliPlan(preset) {
+    const section = el("section", "cli-plan-card");
+    const header = el("div", "split-header");
+    header.appendChild(el("h3", "", "Real Multica CLI Plan"));
+    header.appendChild(el("span", "config-status", "Requires terminal"));
+    section.appendChild(header);
+    section.appendChild(el("p", "cli-plan-note", "This static page cannot execute local commands. Use these commands from the repository root to discover, dry-run, then explicitly apply the agent setup."));
+
+    const commands = [
+      ["Discover", mockData.cliConfig.discover],
+      ["Dry-run", `node src/cli.js agent-config apply --preset ${preset.cliPreset} --output json`],
+      ["Save plan", `node src/cli.js agent-config plan --preset ${preset.cliPreset} --plan-out ${mockData.cliConfig.planOut} --review-out ${mockData.cliConfig.reviewOut}`],
+      ["Execute", `node src/cli.js agent-config apply --preset ${preset.cliPreset} --execute --confirm ${mockData.cliConfig.confirmationToken} --output json`]
+    ];
+
+    const list = el("div", "cli-command-list");
+    commands.forEach(([label, command]) => {
+      const row = el("div", "cli-command-row");
+      row.appendChild(el("span", "cli-command-label", label));
+      row.appendChild(el("code", "", command));
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    section.appendChild(el("p", "cli-plan-warning", "custom_env writes are blocked by design; use --custom-env-file or --custom-env-stdin only after human approval."));
+    return section;
   }
 
   function configList(title, items) {
@@ -633,7 +670,7 @@
       } else if (kind === "open-agent-config") {
         state.agentConfigOpen = true;
         state.agentConfigStatus = "Draft";
-        state.agentConfigFeedback = "Choose a preset, then preview or apply the local mock configuration.";
+        state.agentConfigFeedback = "Choose a preset, then preview locally or run the real CLI plan from a terminal.";
         renderAll();
       } else if (kind === "close-agent-config") {
         state.agentConfigOpen = false;
@@ -641,13 +678,13 @@
       } else if (kind === "preview-agent-config") {
         const preset = currentAgentPreset();
         state.agentConfigStatus = "Previewed";
-        state.agentConfigFeedback = `${preset.name} preview generated locally with ${preset.permissionTemplate}.`;
-        appendRecord("Agent configuration previewed", `${preset.name} uses ${preset.model}, ${preset.runtime}, ${preset.ttl}.`);
+        state.agentConfigFeedback = `${preset.name} preview generated. Use agent-config apply without --execute for a real CLI dry-run.`;
+        appendRecord("Agent configuration previewed", `${preset.name} uses CLI preset ${preset.cliPreset}. Browser preview did not change Multica.`);
         renderAll();
       } else if (kind === "apply-agent-config") {
         const preset = currentAgentPreset();
         state.agentConfigStatus = "Applied locally";
-        state.agentConfigFeedback = `${preset.name} mock configuration applied to the page. No external state changed.`;
+        state.agentConfigFeedback = `${preset.name} mock configuration applied to the page. Real Multica apply requires the terminal confirmation token.`;
         mockData.agent = preset.name;
         mockData.runtime = preset.runtime;
         const matchingTemplate = mockData.templates.find((template) => template.name === preset.permissionTemplate);
@@ -655,7 +692,7 @@
           state.templateId = matchingTemplate.id;
           state.ttl = matchingTemplate.ttl;
         }
-        appendRecord("Agent mock configuration applied", `${preset.name} was applied locally with ${preset.permissionTemplate}.`);
+        appendRecord("Agent mock configuration applied", `${preset.name} was applied locally. Run the CLI Execute command to configure Multica.`);
         renderAll();
       } else if (kind === "preview-permission") {
         appendRecord("Permission preview generated", `${template.name} with TTL ${state.ttl} was previewed locally.`);

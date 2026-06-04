@@ -1094,7 +1094,7 @@ p {
 }
 
 .agent-config-dialog {
-  width: min(920px, 100%);
+  width: min(1060px, 100%);
   max-height: min(780px, calc(100vh - 56px));
   overflow: hidden;
   border: 1px solid var(--line-strong);
@@ -1234,6 +1234,61 @@ p {
   color: var(--muted);
   background: #0d0e10;
   font-size: 13px;
+}
+
+.cli-plan-card {
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.cli-plan-note,
+.cli-plan-warning {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cli-plan-warning {
+  color: #d8d8da;
+}
+
+.cli-command-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cli-command-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cli-command-label {
+  padding-top: 7px;
+  color: var(--subtle);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.cli-command-row code {
+  min-width: 0;
+  max-height: 96px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: #f1f1f2;
+  background: #08090a;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .modal-actions p {
@@ -1787,6 +1842,14 @@ p {
     grid-template-columns: minmax(0, 1fr);
     max-height: calc(100vh - 210px);
     padding: 14px;
+  }
+
+  .cli-command-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cli-command-label {
+    padding-top: 0;
   }
 
   .modal-button-row {

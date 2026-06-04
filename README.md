@@ -17,9 +17,12 @@ one-click agent permission setup before real integration work.
 
 The prototype is intentionally limited:
 
-- It uses mock data only.
-- It does not call the `multica` CLI.
-- It does not write Multica metadata or create issues.
+- The browser view uses local preview data only.
+- It does not execute local commands from the static page.
+- Real one-click agent configuration is exposed through
+  `node src/cli.js agent-config ...`.
+- `agent-config apply` defaults to dry-run; real Multica writes require
+  `--execute --confirm APPLY-MULTICA-AGENT-CONFIG`.
 - It does not add a frontend build chain or runtime dependency.
 
 ## What It Produces
