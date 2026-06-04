@@ -491,7 +491,7 @@ p {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 126px);
-  padding: 24px;
+  padding: 20px;
 }
 
 .placeholder-view {
@@ -509,7 +509,7 @@ p {
   align-items: center;
   gap: 16px;
   min-width: 0;
-  padding-bottom: 26px;
+  padding-bottom: 20px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -545,7 +545,7 @@ p {
 .scope-section,
 .permission-controls,
 .risk-card {
-  padding: 25px 0;
+  padding: 22px 0;
   border-bottom: 1px solid var(--line);
 }
 
@@ -559,7 +559,7 @@ p {
 
 .goal-title {
   max-width: 650px;
-  font-size: clamp(22px, 1.25vw, 25px);
+  font-size: clamp(21px, 1.18vw, 24px);
   font-weight: 680;
   line-height: 1.43;
 }
@@ -660,7 +660,7 @@ p {
 }
 
 .latest-update {
-  min-height: 206px;
+  min-height: 190px;
 }
 
 .split-header {
@@ -706,7 +706,7 @@ p {
 .plan-table th,
 .plan-table td {
   height: 61px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--line);
   color: #d5d6d8;
   text-align: left;
@@ -722,7 +722,7 @@ p {
 
 .plan-table th:first-child,
 .plan-table td:first-child {
-  width: 45px;
+  width: 38px;
   padding-left: 7px;
 }
 
@@ -733,12 +733,12 @@ p {
 
 .plan-table th:nth-child(3),
 .plan-table td:nth-child(3) {
-  width: 122px;
+  width: 106px;
 }
 
 .plan-table th:nth-child(4),
 .plan-table td:nth-child(4) {
-  width: 112px;
+  width: 100px;
 }
 
 .plan-row.status-running {
