@@ -37,10 +37,13 @@ Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica
 当前视觉原型按概念图一比一复原 Multica-like 项目页外壳，因此左侧会显示
 `Overview`、`Project`、`Agents`、`Runs`、`Environments`、`Data`、`Settings`、
 `Docs`、`Support` 等导航元素。其中 `Project` 是承载三栏控制台的默认视图。
+左侧 workspace 卡片下方新增 `一键配置 Agent` 按钮，用于打开本地 mock 配置弹层。
 
 这些导航项在首版中只作为视觉壳和占位视图，不代表 Multica++ 接管 Multica 原生
 项目、agent、run、environment 或 data 管理能力。真实产品能力仍收敛在三栏：
 `Goal`、`Plan` 和 `Agent Permission Setup`。
+`一键配置 Agent` 当前只做 preset 选择、配置预览、mock 应用和页面记录反馈，
+不创建或修改真实 Multica agent。
 
 ## 快速开始
 

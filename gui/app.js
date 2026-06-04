@@ -80,6 +80,47 @@
       }
     ],
     ttlOptions: ["30 minutes", "1 hour", "2 hours", "4 hours"],
+    agentPresets: [
+      {
+        id: "planner",
+        name: "Planner Agent",
+        role: "Plan owner",
+        model: "gpt-5-codex",
+        runtime: "local-docker",
+        permissionTemplate: "Backend Development (Default)",
+        ttl: "2 hours",
+        skills: ["launch-review", "plan-ledger", "permission-preview"],
+        scopes: ["workspace:read", "repo:read", "issue:comment", "permission:preview"],
+        guardrails: ["approval required", "no metadata writes", "mock apply only"],
+        summary: "Best for turning a goal into staged plan steps and permission previews."
+      },
+      {
+        id: "reviewer",
+        name: "Review Agent",
+        role: "Read-only reviewer",
+        model: "gpt-5.4",
+        runtime: "static-browser",
+        permissionTemplate: "Review Only",
+        ttl: "30 minutes",
+        skills: ["diff-review", "risk-summary", "records-check"],
+        scopes: ["workspace:read", "records:read", "permission:preview"],
+        guardrails: ["read-only", "short lease", "human confirmation"],
+        summary: "Best for checking goal, plan, and permission risk before applying a run setup."
+      },
+      {
+        id: "incident",
+        name: "Incident Triage Agent",
+        role: "Blocked run triage",
+        model: "gpt-5-codex",
+        runtime: "local-docker",
+        permissionTemplate: "Incident Read Window",
+        ttl: "15 minutes",
+        skills: ["activity-scan", "blocked-reason", "recovery-note"],
+        scopes: ["activity:read", "records:read", "runtime:read"],
+        guardrails: ["time boxed", "no secret writes", "local event only"],
+        summary: "Best for inspecting blocked plan steps and preparing a recovery note."
+      }
+    ],
     records: [
       {
         time: "2026-06-04 15:00",
@@ -102,6 +143,10 @@
     activeView: "project",
     templateId: "backend",
     ttl: "2 hours",
+    agentConfigOpen: false,
+    agentPresetId: "planner",
+    agentConfigStatus: "Draft",
+    agentConfigFeedback: "Preview is local only. No Multica CLI command or metadata write will run.",
     records: mockData.records.slice()
   };
 
@@ -142,6 +187,10 @@
 
   function currentTemplate() {
     return mockData.templates.find((template) => template.id === state.templateId) || mockData.templates[0];
+  }
+
+  function currentAgentPreset() {
+    return mockData.agentPresets.find((preset) => preset.id === state.agentPresetId) || mockData.agentPresets[0];
   }
 
   function statusLabel(status) {
@@ -461,6 +510,60 @@
     panel.appendChild(list);
   }
 
+  function renderAgentConfig() {
+    const modal = qs("#agent-config-modal");
+    const presetList = qs("#agent-config-presets");
+    const preview = qs("#agent-config-preview");
+    const status = qs("#agent-config-status");
+    const feedback = qs("#agent-config-feedback");
+    if (modal) modal.hidden = !state.agentConfigOpen;
+    if (status) status.textContent = state.agentConfigStatus;
+    if (feedback) feedback.textContent = state.agentConfigFeedback;
+
+    if (presetList) {
+      clear(presetList);
+      mockData.agentPresets.forEach((preset) => {
+        const item = el("button", "preset-option");
+        item.type = "button";
+        item.setAttribute("data-agent-preset", preset.id);
+        item.setAttribute("aria-pressed", preset.id === state.agentPresetId ? "true" : "false");
+        item.appendChild(el("strong", "", preset.name));
+        item.appendChild(el("span", "", preset.summary));
+        presetList.appendChild(item);
+      });
+    }
+
+    if (!preview) return;
+    clear(preview);
+    const preset = currentAgentPreset();
+    const rows = [
+      ["Agent", preset.name],
+      ["Role", preset.role],
+      ["Model", preset.model],
+      ["Runtime", preset.runtime],
+      ["Permission Template", preset.permissionTemplate],
+      ["TTL", preset.ttl]
+    ];
+    const definition = el("dl", "config-definition");
+    rows.forEach(([label, value]) => {
+      definition.appendChild(el("dt", "", label));
+      definition.appendChild(el("dd", "", value));
+    });
+    preview.appendChild(definition);
+    preview.appendChild(configList("Skills", preset.skills));
+    preview.appendChild(configList("Scopes", preset.scopes));
+    preview.appendChild(configList("Guardrails", preset.guardrails));
+  }
+
+  function configList(title, items) {
+    const section = el("section", "config-list");
+    section.appendChild(el("h3", "", title));
+    const list = el("ul", "");
+    items.forEach((item) => list.appendChild(el("li", "", item)));
+    section.appendChild(list);
+    return section;
+  }
+
   function renderPlaceholder() {
     const heading = qs("#placeholder-heading");
     const content = qs("#placeholder-content");
@@ -496,6 +599,7 @@
     renderRecords();
     renderSettings();
     renderPlaceholder();
+    renderAgentConfig();
     setViewVisibility();
     setPressed();
   }
@@ -504,6 +608,15 @@
     document.addEventListener("click", (event) => {
       const nav = event.target.closest("[data-nav-target]");
       const action = event.target.closest("[data-action]");
+      const preset = event.target.closest("[data-agent-preset]");
+
+      if (preset) {
+        state.agentPresetId = preset.getAttribute("data-agent-preset") || state.agentPresetId;
+        state.agentConfigStatus = "Draft";
+        state.agentConfigFeedback = `${currentAgentPreset().name} selected for local preview.`;
+        renderAll();
+        return;
+      }
 
       if (nav) {
         state.activeView = nav.getAttribute("data-nav-target") || "project";
@@ -516,6 +629,33 @@
       const template = currentTemplate();
       if (kind === "open-permissions") {
         state.activeView = "permissions";
+        renderAll();
+      } else if (kind === "open-agent-config") {
+        state.agentConfigOpen = true;
+        state.agentConfigStatus = "Draft";
+        state.agentConfigFeedback = "Choose a preset, then preview or apply the local mock configuration.";
+        renderAll();
+      } else if (kind === "close-agent-config") {
+        state.agentConfigOpen = false;
+        renderAll();
+      } else if (kind === "preview-agent-config") {
+        const preset = currentAgentPreset();
+        state.agentConfigStatus = "Previewed";
+        state.agentConfigFeedback = `${preset.name} preview generated locally with ${preset.permissionTemplate}.`;
+        appendRecord("Agent configuration previewed", `${preset.name} uses ${preset.model}, ${preset.runtime}, ${preset.ttl}.`);
+        renderAll();
+      } else if (kind === "apply-agent-config") {
+        const preset = currentAgentPreset();
+        state.agentConfigStatus = "Applied locally";
+        state.agentConfigFeedback = `${preset.name} mock configuration applied to the page. No external state changed.`;
+        mockData.agent = preset.name;
+        mockData.runtime = preset.runtime;
+        const matchingTemplate = mockData.templates.find((template) => template.name === preset.permissionTemplate);
+        if (matchingTemplate) {
+          state.templateId = matchingTemplate.id;
+          state.ttl = matchingTemplate.ttl;
+        }
+        appendRecord("Agent mock configuration applied", `${preset.name} was applied locally with ${preset.permissionTemplate}.`);
         renderAll();
       } else if (kind === "preview-permission") {
         appendRecord("Permission preview generated", `${template.name} with TTL ${state.ttl} was previewed locally.`);
