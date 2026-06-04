@@ -65,15 +65,27 @@ export async function discoverMulticaEnvironment({
   sourceAgentName = DEFAULT_SOURCE_AGENT_NAME,
   retries = 1,
 } = {}) {
-  const run = withRetry(exec ?? createDefaultExec({ cliPath, timeoutMs }), { retries });
+  const run = withRetry(
+    withCommandTimeout(exec ?? createDefaultExec({ cliPath, timeoutMs }), { timeoutMs }),
+    { retries },
+  );
   const warnings = [];
 
-  const daemonResult = await readText(run, ["daemon", "status"]);
-  const workspaceResult = await readJson(run, ["workspace", "list", "--output", "json"]);
-  const projectResult = await readJson(run, ["project", "list", "--output", "json"]);
-  const runtimeResult = await readJson(run, ["runtime", "list", "--output", "json"]);
-  const agentResult = await readJson(run, ["agent", "list", "--output", "json"]);
-  const skillResult = await readJson(run, ["skill", "list", "--output", "json"]);
+  const [
+    daemonResult,
+    workspaceResult,
+    projectResult,
+    runtimeResult,
+    agentResult,
+    skillResult,
+  ] = await Promise.all([
+    readText(run, ["daemon", "status"]),
+    readJson(run, ["workspace", "list", "--output", "json"]),
+    readJson(run, ["project", "list", "--output", "json"]),
+    readJson(run, ["runtime", "list", "--output", "json"]),
+    readJson(run, ["agent", "list", "--output", "json"]),
+    readJson(run, ["skill", "list", "--output", "json"]),
+  ]);
 
   const failures = [
     daemonResult,
@@ -134,11 +146,12 @@ export async function discoverMulticaEnvironment({
 export function buildAgentConfigPlan({
   environment,
   presetId = "planner",
+  preset: presetOverride,
   mode,
   createdAt = new Date().toISOString(),
   confirmationToken = DEFAULT_CONFIRMATION_TOKEN,
 } = {}) {
-  const preset = agentConfigPresets.find((item) => item.id === presetId) ?? agentConfigPresets[0];
+  const preset = presetOverride ?? agentConfigPresets.find((item) => item.id === presetId) ?? agentConfigPresets[0];
   const warnings = [...(environment?.warnings ?? [])];
 
   if (!environment?.ok) {
@@ -165,8 +178,8 @@ export function buildAgentConfigPlan({
     name: preset.name,
     description: preset.description,
     runtimeId: runtime.id,
-    model: sourceAgent.model || runtime.model || "",
-    visibility: sourceAgent.visibility || "private",
+    model: preset.model || sourceAgent.model || runtime.model || "",
+    visibility: preset.visibility || sourceAgent.visibility || "private",
     maxConcurrentTasks: preset.maxConcurrentTasks,
     customArgs: safeCustomArgs,
     instructions: buildAgentInstructions({ preset, environment }),
@@ -564,6 +577,26 @@ function createDefaultExec({ cliPath, timeoutMs }) {
   });
 }
 
+function withCommandTimeout(exec, { timeoutMs }) {
+  return async (args) => {
+    let timer;
+    return Promise.race([
+      exec(args),
+      new Promise((resolve) => {
+        timer = setTimeout(() => {
+          resolve({
+            stdout: "",
+            stderr: `command timed out after ${timeoutMs}ms: ${formatCommand(["multica", ...args])}`,
+            code: 124,
+          });
+        }, timeoutMs);
+      }),
+    ]).finally(() => {
+      clearTimeout(timer);
+    });
+  };
+}
+
 async function readText(exec, args) {
   try {
     const result = await exec(args);
@@ -658,6 +691,11 @@ function summarizeEnvironment(environment) {
 function buildAgentInstructions({ preset, environment }) {
   const projectTitle = environment.project?.title || DEFAULT_PROJECT_TITLE;
   const workspaceName = environment.workspace?.name || DEFAULT_WORKSPACE_NAME;
+  const customInstructions = preset.instructions ? [
+    "",
+    "Preset instructions:",
+    preset.instructions,
+  ] : [];
   return [
     `你是 ${projectTitle} 的 ${preset.name}。`,
     "",
@@ -674,6 +712,7 @@ function buildAgentInstructions({ preset, environment }) {
     "",
     "Guardrails:",
     ...preset.guardrails.map((guardrail) => `- ${guardrail}`),
+    ...customInstructions,
   ].join("\n");
 }
 

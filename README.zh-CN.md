@@ -36,17 +36,19 @@ Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica
 - `Plan`：计划步骤、状态、依赖、当前执行项和阻塞项。
 - `Agent Permission Setup`：权限模板、scope、TTL、审批、风险摘要、预览和应用。
 
-当前视觉原型按概念图一比一复原 Multica-like 项目页外壳，因此左侧会显示
-`Overview`、`Project`、`Agents`、`Runs`、`Environments`、`Data`、`Settings`、
-`Docs`、`Support` 等导航元素。其中 `Project` 是承载三栏控制台的默认视图。
-左侧 workspace 卡片下方新增 `一键配置 Agent` 按钮，用于打开本地 mock 配置弹层。
+当前 GUI 左侧是 Multica++ 插件导航：`Control`、`Permissions`、`Activity`、
+`Records`、`Settings`。其中 `Control` 是承载三栏控制台的默认视图。左侧
+workspace 卡片下方新增 `一键配置 Agent` 按钮，用于打开本地配置弹层。
 
-这些导航项在首版中只作为视觉壳和占位视图，不代表 Multica++ 接管 Multica 原生
-项目、agent、run、environment 或 data 管理能力。真实产品能力仍收敛在三栏：
-`Goal`、`Plan` 和 `Agent Permission Setup`。
-`一键配置 Agent` 当前支持两种路径：浏览器预览按钮只更新页面记录；`Image2
-Codex Agent` preset 下的 `Create Image2 Codex Agent` 会调用本地 GUI server，
-注册 `paigod-imagegen` skill，并创建或更新真实 Multica Codex Agent。
+左侧还会显示 `Plugin Presets` 和 `Team Presets`。`Project`、`Issues`、
+`Agents`、`Runs`、`Environments`、`Data`、`Skills`、`MCP` 和 runtime settings
+继续留在 Multica 原生侧；Multica++ 不接管这些完整管理页面。真实产品能力仍
+收敛在三栏：`Goal`、`Plan` 和 `Agent Permission Setup`。
+`一键配置 Agent` 正在重构为预制体体系：左侧会展示插件内置预制体和团队成员
+创建的预制体。用户点击预制体后可以查看并修改默认 Agent 名称、instructions、
+skills、MCP、权限 scope、TTL、审批要求和环境配置路径提示，再 Preview dry-run
+计划或创建 Multica Agent。MCP 和 secret env 目前只做可见提示和阻断记录，不会
+伪造已写入。
 
 ## 快速开始
 
@@ -77,6 +79,10 @@ npm run gui
 - 创建或更新 `Multica++ Image2 Codex Agent`。
 - 绑定 `paigod-imagegen` skill 到该 agent。
 - 把审计记录追加到 `out/agent-config-events.jsonl`。
+
+也可以直接在左侧 `Plugin Presets` / `Team Presets` 中选择预制体，修改默认配置
+后点击 `Preview Plan` 或 `Create Agent`。当前真实创建范围是 Multica Agent；
+Squad 预制体先作为后续扩展。
 
 用示例 JSON 生成审阅材料：
 
@@ -156,6 +162,8 @@ node src/cli.js list --ledger out/ledger.jsonl --output json
 - `src/multica-client.js`：Multica CLI 只读 adapter。
 - `src/multica-mapper.js`：真实 Multica 数据到 Runtime Agent Spec 的映射。
 - `src/agent-config.js`：一键配置 Agent 的 Multica CLI 探测、计划和受控执行。
+- `src/agent-preset.js`：插件预制体、团队预制体、用户覆盖合并和预制体到 Agent
+  配置计划的转换。
 - `src/gui-server.js`：本地 GUI server 和按钮触发的真实 Image2 Agent 创建 API。
 - `examples/`：issue assignment、comment mention、autopilot run 示例输入。
 - `ops/monitoring/`：本地监控记录、更新日志、快照和备份目录。

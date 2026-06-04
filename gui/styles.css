@@ -245,6 +245,71 @@ p {
   font-size: 12px;
 }
 
+.preset-sidebar {
+  display: grid;
+  gap: 16px;
+  max-height: 260px;
+  margin: 0 14px 18px;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.preset-sidebar-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.preset-sidebar-group h2 {
+  margin: 0;
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.preset-sidebar-list {
+  display: grid;
+  gap: 6px;
+}
+
+.preset-sidebar-button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 10px;
+  overflow: hidden;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.preset-sidebar-button:hover,
+.preset-sidebar-button[aria-pressed="true"] {
+  border-color: var(--line-strong);
+  background: #151619;
+}
+
+.preset-sidebar-button strong,
+.preset-sidebar-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-sidebar-button strong {
+  font-size: 13px;
+}
+
+.preset-sidebar-button span {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
 .workspace-avatar,
 .user-avatar {
   display: inline-flex;
@@ -1188,6 +1253,59 @@ p {
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.018);
+}
+
+.preset-detail-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.preset-edit-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--subtle);
+  font-size: 13px;
+}
+
+.preset-edit-field input,
+.preset-edit-field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: #0b0c0d;
+}
+
+.preset-edit-field input {
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.preset-edit-field textarea {
+  min-height: 112px;
+  resize: vertical;
+  padding: 10px 12px;
+  line-height: 1.5;
+}
+
+.preset-config-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.preset-definition {
+  grid-template-columns: minmax(92px, max-content) minmax(0, 1fr);
+}
+
+.preset-feedback {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .config-definition {

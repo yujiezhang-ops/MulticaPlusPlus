@@ -29,30 +29,33 @@
           </span>
         </button>
 
-        <nav class="sidebar-nav sidebar-nav-primary" aria-label="Project navigation">
-          <button type="button" data-nav-target="overview">
+        <section class="preset-sidebar" aria-label="Agent presets">
+          <div class="preset-sidebar-group">
+            <h2>Plugin Presets</h2>
+            <div id="plugin-preset-list" class="preset-sidebar-list" aria-live="polite"></div>
+          </div>
+          <div class="preset-sidebar-group">
+            <h2>Team Presets</h2>
+            <div id="team-preset-list" class="preset-sidebar-list" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <nav class="sidebar-nav sidebar-nav-primary" aria-label="Plugin navigation">
+          <button type="button" data-nav-target="control" aria-current="page">
             <span class="nav-icon nav-icon-home" aria-hidden="true"></span>
-            <span>Overview</span>
+            <span>Control</span>
           </button>
-          <button type="button" data-nav-target="project" aria-current="page">
-            <span class="nav-icon nav-icon-folder" aria-hidden="true"></span>
-            <span>Project</span>
+          <button type="button" data-nav-target="permissions">
+            <span class="nav-icon nav-icon-lock" aria-hidden="true"></span>
+            <span>Permissions</span>
           </button>
-          <button type="button" data-nav-target="agents">
-            <span class="nav-icon nav-icon-agent" aria-hidden="true"></span>
-            <span>Agents</span>
-          </button>
-          <button type="button" data-nav-target="runs">
+          <button type="button" data-nav-target="activity">
             <span class="nav-icon nav-icon-play" aria-hidden="true"></span>
-            <span>Runs</span>
+            <span>Activity</span>
           </button>
-          <button type="button" data-nav-target="environments">
-            <span class="nav-icon nav-icon-cube" aria-hidden="true"></span>
-            <span>Environments</span>
-          </button>
-          <button type="button" data-nav-target="data">
+          <button type="button" data-nav-target="records">
             <span class="nav-icon nav-icon-database" aria-hidden="true"></span>
-            <span>Data</span>
+            <span>Records</span>
           </button>
           <button type="button" data-nav-target="settings">
             <span class="nav-icon nav-icon-gear" aria-hidden="true"></span>
@@ -60,14 +63,10 @@
           </button>
         </nav>
 
-        <nav class="sidebar-nav sidebar-nav-secondary" aria-label="Help navigation">
-          <button type="button" data-nav-target="docs">
-            <span class="nav-icon nav-icon-docs" aria-hidden="true"></span>
-            <span>Docs</span>
-          </button>
-          <button type="button" data-nav-target="support">
-            <span class="nav-icon nav-icon-support" aria-hidden="true"></span>
-            <span>Support</span>
+        <nav class="sidebar-nav sidebar-nav-secondary" aria-label="Native Multica boundary">
+          <button type="button" data-nav-target="native-boundary">
+            <span class="nav-icon nav-icon-folder" aria-hidden="true"></span>
+            <span>Native Multica</span>
           </button>
         </nav>
 
@@ -109,7 +108,7 @@
         </header>
 
         <main class="views">
-          <section id="view-control" class="control-grid" data-view="project">
+          <section id="view-control" class="control-grid" data-view="control">
             <section id="goal-panel" class="panel" aria-labelledby="goal-heading">
               <header class="panel-header">
                 <span class="panel-index">1</span>
@@ -171,7 +170,7 @@
 
           <section id="placeholder-view" class="placeholder-view" data-view="placeholder" hidden>
             <header class="view-header">
-              <h1 id="placeholder-heading">Project</h1>
+              <h1 id="placeholder-heading">Control</h1>
             </header>
             <div id="placeholder-content" class="dynamic-region" aria-live="polite"></div>
           </section>
@@ -201,6 +200,32 @@
               <span id="agent-config-status" class="config-status">Draft</span>
             </div>
             <div id="agent-config-preview" class="config-preview-card" aria-live="polite"></div>
+            <section id="preset-detail" class="preset-detail-card" aria-labelledby="preset-detail-heading">
+              <div class="split-header">
+                <h2 id="preset-detail-heading">Preset Editor</h2>
+                <span id="preset-status" class="config-status">Draft</span>
+              </div>
+              <label class="preset-edit-field">
+                <span>Agent Name</span>
+                <input id="preset-agent-name" type="text">
+              </label>
+              <label class="preset-edit-field">
+                <span>Instructions</span>
+                <textarea id="preset-agent-instructions" rows="5"></textarea>
+              </label>
+              <div id="preset-config-summary" class="preset-config-summary" aria-live="polite"></div>
+              <p id="preset-feedback" class="preset-feedback">Select a preset to edit its default configuration.</p>
+              <div class="modal-button-row">
+                <button type="button" class="outline-button" data-action="preview-selected-preset">
+                  <span class="button-icon nav-icon-eye" aria-hidden="true"></span>
+                  <span>Preview Plan</span>
+                </button>
+                <button type="button" class="primary-button" data-action="create-selected-preset-agent">
+                  <span class="button-icon nav-icon-agent" aria-hidden="true"></span>
+                  <span>Create Agent</span>
+                </button>
+              </div>
+            </section>
           </section>
         </div>
 

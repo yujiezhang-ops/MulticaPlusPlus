@@ -68,6 +68,40 @@ test("discovers the local Multica workspace, project, runtime, source agent, and
   assert.deepEqual(environment.skills.map((skill) => skill.name), ["launch-review"]);
 });
 
+test("starts independent Multica environment reads in parallel", async () => {
+  const calls = [];
+  const pending = new Map();
+  const environmentPromise = discoverMulticaEnvironment({
+    exec: async (args) => {
+      calls.push(args);
+      const key = args.join(" ");
+      return new Promise((resolve) => {
+        pending.set(key, resolve);
+      });
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, [
+    ["daemon", "status"],
+    ["workspace", "list", "--output", "json"],
+    ["project", "list", "--output", "json"],
+    ["runtime", "list", "--output", "json"],
+    ["agent", "list", "--output", "json"],
+    ["skill", "list", "--output", "json"],
+  ]);
+
+  pending.get("daemon status")(textResult("Daemon:      running\nVersion:     0.3.15\n"));
+  pending.get("workspace list --output json")(jsonResult([{ id: "ws-1", name: "SparkProject", slug: "sparkproject" }]));
+  pending.get("project list --output json")(jsonResult([{ id: "project-1", title: "MulticaPlusPlus", workspace_id: "ws-1" }]));
+  pending.get("runtime list --output json")(jsonResult([{ id: "rt-codex", provider: "codex", name: "Codex Local", status: "online" }]));
+  pending.get("agent list --output json")(jsonResult([{ id: "agent-source", name: "Codex Full Access Worker", runtime_id: "rt-codex" }]));
+  pending.get("skill list --output json")(jsonResult([]));
+
+  const environment = await environmentPromise;
+  assert.equal(environment.ok, true);
+});
+
 test("retries transient Multica read failures during environment discovery", async () => {
   const attempts = new Map();
   const environment = await discoverMulticaEnvironment({

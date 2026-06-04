@@ -100,32 +100,46 @@ Plan 栏用于回答“agent 准备如何完成目标，以及现在进行到哪
 - 高风险 scope 不被静默授权。
 - 权限配置可记录、可复盘、可逐步接入短租约。
 
+### 5.4 Agent 预制体体系
+
+一键配置 Agent 后续不只是一个按钮，而是预制体体系。预制体把团队共同工作环境
+和实践样例沉淀为可复用配置，包含 skills、MCP、instructions、runtime hint、
+权限 scope、TTL、审批要求和环境配置路径提示。
+
+首版分为两类：
+
+- 插件预制体：Multica++ 内置，覆盖 Planner、Executor、Review、Image2、
+  Incident 等通用场景。
+- 团队预制体：团队成员从共同工作环境创建，带创建者、适用场景和默认配置。
+
+用户点击预制体后，可以修改默认 Agent 名称和 instructions，再 Preview dry-run
+计划或创建 Multica Agent。MCP 和 secret env 在第一版只展示为配置提示和阻断项，
+不声明已经写入。Squad 预制体先保留为后续扩展。
+
 ## 6. GUI 信息架构
 
-当前视觉原型为了贴近 Multica 项目页概念图，左侧复原 Multica-like 导航外壳：
+当前 GUI 左侧是 Multica++ 插件导航，不复刻 Multica 原生工作台。一级入口最多保留：
 
-- `Overview`
-- `Project`
-- `Agents`
-- `Runs`
-- `Environments`
-- `Data`
+- `Control`
+- `Permissions`
+- `Activity`
+- `Records`
 - `Settings`
-- `Docs`
-- `Support`
 
-其中 `Project` 是默认工作视图，承载 Goal、Plan 和一键权限配置三栏。
+其中 `Control` 是默认工作视图，承载 Goal、Plan 和一键权限配置三栏。
 
-这些入口在 M2 静态原型中只作为视觉壳和占位视图，不代表 Multica++ 接管 Multica
-原生导航能力。产品功能边界仍然是：
+左侧还展示两组可点击预制体：`Plugin Presets` 和 `Team Presets`。用户可以从
+预制体进入配置编辑器，修改默认 Agent 名称和 instructions，再 Preview 或 Create
+Agent。
+
+`Project`、`Issues`、`Agents`、`Runs`、`Environments`、`Data`、`Skills`、
+`MCP` 和 runtime settings 继续留在 Multica 原生侧。Multica++ 可以展示
+`Native Multica` 边界说明，但不提供这些能力的完整管理页面。产品功能边界仍然是：
 
 - `Goal`：当前目标、恢复入口和目标更新。
 - `Plan`：计划步骤、依赖、当前步骤和阻塞状态。
 - `Agent Permission Setup`：权限模板、scope、TTL、审批策略、风险预览和本地 mock
   应用动作。
-
-后续如需要独立插件导航，可再收敛为 `Control`、`Permissions`、`Activity`、
-`Records`、`Settings`，但不作为当前像素复原版的首要目标。
 
 ## 7. 路线图
 
@@ -151,7 +165,8 @@ draft。
 
 - 深色 Multica-like 控制台。
 - 三栏首屏：Goal、Plan、Agent Permission Setup。
-- 左侧复原 Multica-like 项目页导航外壳，Project 视图承载三栏控制台。
+- 左侧插件导航：Control、Permissions、Activity、Records、Settings。
+- 左侧预制体区域：Plugin Presets 和 Team Presets。
 - 概念图与 prompt 记录。
 - 不接真实 Multica CLI，不写 Multica metadata。
 
@@ -163,7 +178,9 @@ draft。
 
 1. Goal/Plan ledger：支持步骤状态、恢复点、证据和 blocked 原因。
 2. 权限短租约：支持 TTL、审批字段、高风险自动要求确认。
-3. Preset/Profile：从 issue、agent、workspace 生成默认 goal、plan 和权限模板。
+3. Preset/Profile：建立插件预制体和团队预制体体系，从团队共同环境沉淀默认
+   skills、MCP、instructions、runtime、权限、TTL、审批和环境配置路径提示；
+   支持用户修改后创建 Agent，Squad 先预览后接入。
 4. 上游兼容：真实 CLI fixtures、fail-closed adapter 和 launch record 回传。
 
 ### M3：Activity 与 Records

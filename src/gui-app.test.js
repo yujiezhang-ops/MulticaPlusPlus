@@ -42,14 +42,159 @@ test("GUI button posts to the local Image2 agent creation endpoint", async () =>
 
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  assert.equal(fetchCalls.length, 1);
-  assert.equal(fetchCalls[0].url, "/api/agent-config/image2/create");
-  assert.equal(fetchCalls[0].options.method, "POST");
-  assert.equal(JSON.parse(fetchCalls[0].options.body).confirm, "CREATE-MULTICA-IMAGE2-CODEX-AGENT");
+  const image2Call = fetchCalls.find((call) => call.url === "/api/agent-config/image2/create");
+  assert.ok(image2Call, "Image2 create endpoint should be called");
+  assert.equal(image2Call.options.method, "POST");
+  assert.equal(JSON.parse(image2Call.options.body).confirm, "CREATE-MULTICA-IMAGE2-CODEX-AGENT");
   assert.ok(document.textContent().includes("Created in Multica"));
   assert.ok(document.textContent().includes("agent-created"));
   assert.ok(clickLog.includes("data-action:create-image2-agent"));
 });
+
+test("GUI renders plugin and team presets, previews an edited preset, and creates it", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document, clickLog } = createTinyDocument();
+  const fetchCalls = [];
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") {
+        return responseJson({
+          ok: true,
+          presets: [
+            {
+              id: "planner",
+              source: "plugin",
+              target: "agent",
+              name: "Planner Agent",
+              description: "Plan work.",
+              role: "Plan owner",
+              createdBy: "Multica++",
+              useCases: ["planning"],
+              agent: {
+                name: "Multica++ Planner Agent",
+                description: "Planner",
+                instructions: "Plan carefully.",
+                model: "pa/gpt-5.5",
+                runtimeHint: "local-codex",
+                visibility: "private",
+                maxConcurrentTasks: 1,
+              },
+              skills: [{ name: "launch-review" }],
+              mcpServers: [],
+              permissions: {
+                scopes: ["workspace:read"],
+                ttl: "1 hour",
+                approvalRequired: true,
+                riskLevel: "low",
+              },
+              environment: [],
+              guardrails: ["dry-run first"],
+            },
+            {
+              id: "team-gui-builder",
+              source: "team",
+              target: "agent",
+              name: "Team GUI Builder Agent",
+              description: "Build GUI.",
+              role: "GUI builder",
+              createdBy: "PPIO Team",
+              useCases: ["gui"],
+              agent: {
+                name: "Team GUI Builder Agent",
+                description: "GUI builder",
+                instructions: "Build the GUI.",
+                model: "pa/gpt-5.5",
+                runtimeHint: "local-codex",
+                visibility: "private",
+                maxConcurrentTasks: 1,
+              },
+              skills: [{ name: "launch-review" }],
+              mcpServers: [{ name: "filesystem", purpose: "read files", required: true }],
+              permissions: {
+                scopes: ["workspace:read", "repo:write"],
+                ttl: "2 hours",
+                approvalRequired: true,
+                riskLevel: "medium",
+              },
+              environment: [{ key: "GITHUB_TOKEN", pathHint: "GitHub CLI keyring", required: false }],
+              guardrails: ["run npm test"],
+            },
+          ],
+        });
+      }
+      if (url === "/api/agent-presets/team-gui-builder/plan") {
+        return responseJson({
+          ok: true,
+          plan: {
+            ok: true,
+            target: { name: "Edited Team GUI Agent" },
+            blockedOperations: [{ type: "agent:mcp:set" }],
+          },
+        });
+      }
+      if (url === "/api/agent-presets/team-gui-builder/create") {
+        return responseJson({
+          ok: true,
+          result: { targetAgentId: "agent-from-preset" },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.querySelector("[data-agent-preset-id='team-gui-builder']"));
+
+  assert.ok(document.textContent().includes("Plugin Presets"));
+  assert.ok(document.textContent().includes("Team Presets"));
+  assert.ok(document.textContent().includes("Team GUI Builder Agent"));
+
+  const teamPreset = document.querySelector("[data-agent-preset-id='team-gui-builder']");
+  teamPreset.dispatchEvent({ type: "click", target: teamPreset });
+  document.querySelector("#preset-agent-name").value = "Edited Team GUI Agent";
+  document.querySelector("#preset-agent-instructions").value = "Implement the edited preset flow.";
+
+  const previewButton = document.querySelector("[data-action='preview-selected-preset']");
+  previewButton.dispatchEvent({ type: "click", target: previewButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const createButton = document.querySelector("[data-action='create-selected-preset-agent']");
+  createButton.dispatchEvent({ type: "click", target: createButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(fetchCalls.some((call) => call.url === "/api/agent-presets"), true);
+  assert.equal(fetchCalls.some((call) => call.url === "/api/agent-presets/team-gui-builder/plan"), true);
+  assert.equal(fetchCalls.some((call) => call.url === "/api/agent-presets/team-gui-builder/create"), true);
+  const createCall = fetchCalls.find((call) => call.url === "/api/agent-presets/team-gui-builder/create");
+  assert.equal(JSON.parse(createCall.options.body).confirm, "CREATE-MULTICA-AGENT-FROM-PRESET");
+  assert.ok(document.textContent().includes("agent-from-preset"));
+  assert.ok(clickLog.includes("data-action:create-selected-preset-agent"));
+});
+
+function responseJson(value) {
+  return {
+    ok: true,
+    async json() {
+      return value;
+    },
+  };
+}
+
+async function waitFor(fn) {
+  for (let index = 0; index < 20; index += 1) {
+    const value = fn();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return null;
+}
 
 function createTinyDocument() {
   const clickHandlers = [];
@@ -63,6 +208,14 @@ function createTinyDocument() {
       if (type === "click") clickHandlers.push(handler);
     },
     querySelector(selector) {
+      if (selector.startsWith("[data-agent-preset-id='")) {
+        const id = selector.slice("[data-agent-preset-id='".length, -2);
+        return findNodeByAttribute(document.body, "data-agent-preset-id", id);
+      }
+      if (selector.startsWith("[data-action='")) {
+        const action = selector.slice("[data-action='".length, -2);
+        return nodes.get(selector) ?? findNodeByAttribute(document.body, "data-action", action);
+      }
       return nodes.get(selector) ?? null;
     },
     querySelectorAll(selector) {
@@ -97,10 +250,29 @@ function createTinyDocument() {
     "#agent-config-preview",
     "#agent-config-status",
     "#agent-config-feedback",
+    "#plugin-preset-list",
+    "#team-preset-list",
+    "#preset-detail",
+    "#preset-agent-name",
+    "#preset-agent-instructions",
+    "#preset-config-summary",
+    "#preset-status",
+    "#preset-feedback",
   ];
-  selectors.forEach((selector) => nodes.set(selector, element(selector.replace(/^[#.]/, "div"))));
+  selectors.forEach((selector) => {
+    const node = element(selector.replace(/^[#.]/, "div"));
+    nodes.set(selector, node);
+    document.body.appendChild(node);
+  });
+  nodes.get("#plugin-preset-list").textContent = "Plugin Presets";
+  nodes.get("#team-preset-list").textContent = "Team Presets";
   nodes.set("[data-action='open-agent-config']", actionButton("open-agent-config"));
+  nodes.set("[data-action='preview-selected-preset']", actionButton("preview-selected-preset"));
+  nodes.set("[data-action='create-selected-preset-agent']", actionButton("create-selected-preset-agent"));
   nodes.set("[data-action='create-image2-agent']", null);
+  document.body.appendChild(nodes.get("[data-action='open-agent-config']"));
+  document.body.appendChild(nodes.get("[data-action='preview-selected-preset']"));
+  document.body.appendChild(nodes.get("[data-action='create-selected-preset-agent']"));
 
   function actionButton(action) {
     const node = element("button");
@@ -131,6 +303,10 @@ function createTinyDocument() {
         this.firstChild = this.children[0] ?? null;
         if (child?.getAttribute?.("data-action") === "create-image2-agent") {
           nodes.set("[data-action='create-image2-agent']", child);
+        }
+        const presetId = child?.getAttribute?.("data-agent-preset-id");
+        if (presetId) {
+          nodes.set(`[data-agent-preset-id='${presetId}']`, child);
         }
         return child;
       },
@@ -171,4 +347,14 @@ function createTinyDocument() {
   }
 
   return { document, clickLog };
+}
+
+function findNodeByAttribute(root, name, value) {
+  if (!root) return null;
+  if (root.getAttribute?.(name) === value) return root;
+  for (const child of root.children ?? []) {
+    const match = findNodeByAttribute(child, name, value);
+    if (match) return match;
+  }
+  return null;
 }

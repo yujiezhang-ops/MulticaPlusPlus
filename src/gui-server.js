@@ -8,9 +8,17 @@ import {
   buildImage2AgentConfigPlan,
   discoverMulticaEnvironment,
 } from "./agent-config.js";
+import {
+  buildAgentConfigPlanFromPreset,
+  listAgentPresets,
+  mergePresetOverrides,
+} from "./agent-preset.js";
 
 const DEFAULT_AUDIT_PATH = "out/agent-config-events.jsonl";
 const IMAGE2_CONFIRMATION_TOKEN = "CREATE-MULTICA-IMAGE2-CODEX-AGENT";
+const PRESET_CONFIRMATION_TOKEN = "CREATE-MULTICA-AGENT-FROM-PRESET";
+const DEFAULT_DISCOVERY_TIMEOUT_MS = 5000;
+const DEFAULT_DISCOVERY_RETRIES = 0;
 
 export async function createGuiServer({
   host = "127.0.0.1",
@@ -18,13 +26,42 @@ export async function createGuiServer({
   guiDir = "gui",
   auditPath = DEFAULT_AUDIT_PATH,
   cliPath = "multica",
+  discoveryTimeoutMs = DEFAULT_DISCOVERY_TIMEOUT_MS,
+  discoveryRetries = DEFAULT_DISCOVERY_RETRIES,
   exec,
 } = {}) {
   const root = resolve(guiDir);
   const server = createServer(async (request, response) => {
     try {
       if (request.method === "POST" && request.url === "/api/agent-config/image2/create") {
-        await handleImage2Create({ request, response, auditPath, cliPath, exec });
+        await handleImage2Create({
+          request,
+          response,
+          auditPath,
+          cliPath,
+          discoveryTimeoutMs,
+          discoveryRetries,
+          exec,
+        });
+        return;
+      }
+      if (request.method === "GET" && request.url === "/api/agent-presets") {
+        sendJson(response, 200, { ok: true, presets: listAgentPresets() });
+        return;
+      }
+      const presetMatch = request.url?.match(/^\/api\/agent-presets\/([^/]+)\/(plan|create)$/);
+      if (request.method === "POST" && presetMatch) {
+        await handlePresetAction({
+          request,
+          response,
+          auditPath,
+          cliPath,
+          discoveryTimeoutMs,
+          discoveryRetries,
+          exec,
+          presetId: decodeURIComponent(presetMatch[1]),
+          action: presetMatch[2],
+        });
         return;
       }
       if (request.method === "GET" || request.method === "HEAD") {
@@ -46,7 +83,15 @@ export async function createGuiServer({
   };
 }
 
-async function handleImage2Create({ request, response, auditPath, cliPath, exec }) {
+async function handleImage2Create({
+  request,
+  response,
+  auditPath,
+  cliPath,
+  discoveryTimeoutMs,
+  discoveryRetries,
+  exec,
+}) {
   const body = await readJsonBody(request);
   if (body.confirm !== IMAGE2_CONFIRMATION_TOKEN) {
     sendJson(response, 403, {
@@ -56,7 +101,12 @@ async function handleImage2Create({ request, response, auditPath, cliPath, exec 
     return;
   }
 
-  const environment = await discoverMulticaEnvironment({ cliPath, exec });
+  const environment = await discoverMulticaEnvironment({
+    cliPath,
+    exec,
+    timeoutMs: discoveryTimeoutMs,
+    retries: discoveryRetries,
+  });
   const plan = buildImage2AgentConfigPlan({
     environment,
     skillPath: body.skillPath,
@@ -86,6 +136,82 @@ async function handleImage2Create({ request, response, auditPath, cliPath, exec 
 
   sendJson(response, result.ok ? 200 : 500, {
     ok: result.ok,
+    plan: summarizePlan(plan),
+    result,
+  });
+}
+
+async function handlePresetAction({
+  request,
+  response,
+  auditPath,
+  cliPath,
+  discoveryTimeoutMs,
+  discoveryRetries,
+  exec,
+  presetId,
+  action,
+}) {
+  const body = await readJsonBody(request);
+  if (action === "create" && body.confirm !== PRESET_CONFIRMATION_TOKEN) {
+    sendJson(response, 403, {
+      ok: false,
+      error: `confirmation token required: ${PRESET_CONFIRMATION_TOKEN}`,
+    });
+    return;
+  }
+
+  const basePreset = listAgentPresets().find((preset) => preset.id === presetId);
+  if (!basePreset) {
+    sendJson(response, 404, { ok: false, error: `unknown preset: ${presetId}` });
+    return;
+  }
+
+  const preset = mergePresetOverrides(basePreset, body.overrides ?? {});
+  const environment = await discoverMulticaEnvironment({
+    cliPath,
+    exec,
+    timeoutMs: discoveryTimeoutMs,
+    retries: discoveryRetries,
+  });
+  const plan = buildAgentConfigPlanFromPreset({ environment, preset });
+  if (action === "plan") {
+    sendJson(response, plan.ok ? 200 : 500, {
+      ok: plan.ok,
+      error: plan.ok ? null : plan.error,
+      preset,
+      plan,
+    });
+    return;
+  }
+
+  const result = await applyAgentConfigPlan({
+    plan,
+    cliPath,
+    exec,
+    execute: true,
+    confirm: plan.confirmationToken,
+  });
+
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "agent_preset_create",
+    status: result.ok ? "success" : "failed",
+    preset_id: preset.id,
+    preset_source: preset.source,
+    target: plan.target?.name ?? preset.agent?.name ?? preset.name,
+    target_agent_id: result.targetAgentId ?? "",
+    summary: result.ok
+      ? "Created or updated Multica agent from preset."
+      : result.error ?? "Preset agent creation failed.",
+    operation_types: plan.operations?.map((operation) => operation.type) ?? [],
+    warnings: result.warnings ?? [],
+  });
+
+  sendJson(response, result.ok ? 200 : 500, {
+    ok: result.ok,
+    preset,
     plan: summarizePlan(plan),
     result,
   });
