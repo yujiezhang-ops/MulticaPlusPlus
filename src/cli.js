@@ -12,6 +12,7 @@ import {
 import { createMulticaClient } from "./multica-client.js";
 import {
   applyAgentConfigPlan,
+  buildImage2AgentConfigPlan,
   buildAgentConfigPlan,
   discoverMulticaEnvironment,
   renderAgentConfigPlanMarkdown,
@@ -133,11 +134,16 @@ async function handleAgentConfig(args) {
     return;
   }
 
-  const plan = buildAgentConfigPlan({
-    environment,
-    presetId: args.preset,
-    mode: args.mode,
-  });
+  const plan = args.preset === "image2"
+    ? buildImage2AgentConfigPlan({
+      environment,
+      skillPath: args.skillPath,
+    })
+    : buildAgentConfigPlan({
+      environment,
+      presetId: args.preset,
+      mode: args.mode,
+    });
 
   if (args.planOut) {
     await writeArtifact(args.planOut, JSON.stringify(plan, null, 2) + "\n");
@@ -291,6 +297,9 @@ function parseArgs(argv) {
       case "--preset":
         parsed.preset = argv[++index];
         break;
+      case "--skill-path":
+        parsed.skillPath = argv[++index];
+        break;
       case "--mode":
         parsed.mode = argv[++index];
         if (!["create", "update"].includes(parsed.mode)) {
@@ -373,9 +382,10 @@ Discover, plan, or apply a one-click Multica agent configuration.
 
 Usage:
   multica-launch-review agent-config discover [--output json]
-  multica-launch-review agent-config plan [--preset planner|review|incident] [--plan-out plan.json] [--review-out plan.md]
-  multica-launch-review agent-config apply [--preset planner|review|incident] [--output json]
+  multica-launch-review agent-config plan [--preset planner|review|incident|image2] [--plan-out plan.json] [--review-out plan.md]
+  multica-launch-review agent-config apply [--preset planner|review|incident|image2] [--output json]
   multica-launch-review agent-config apply --execute --confirm APPLY-MULTICA-AGENT-CONFIG
+  multica-launch-review agent-config apply --preset image2 --execute --confirm CREATE-MULTICA-IMAGE2-CODEX-AGENT
 
 Safety:
   apply defaults to dry-run. Real Multica writes require --execute and the confirmation token.

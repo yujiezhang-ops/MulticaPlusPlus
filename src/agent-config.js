@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
 
 const DEFAULT_CONFIRMATION_TOKEN = "APPLY-MULTICA-AGENT-CONFIG";
+const IMAGE2_CONFIRMATION_TOKEN = "CREATE-MULTICA-IMAGE2-CODEX-AGENT";
 const DEFAULT_WORKSPACE_NAME = "SparkProject";
 const DEFAULT_PROJECT_TITLE = "MulticaPlusPlus";
 const DEFAULT_SOURCE_AGENT_NAME = "Codex Full Access Worker";
+const DEFAULT_PAIGOD_SKILL_PATH = "C:\\Users\\PPIO\\.codex\\skills\\paigod-imagegen\\SKILL.md";
 
 export const agentConfigPresets = [
   {
@@ -40,6 +42,19 @@ export const agentConfigPresets = [
     maxConcurrentTasks: 1,
   },
 ];
+
+export const image2AgentPreset = {
+  id: "image2",
+  name: "Multica++ Image2 Codex Agent",
+  role: "高质量 Image2 生成 Agent",
+  description:
+    "Codex image generation agent using the local Paigod image2 workflow and automatic Codex approval permissions.",
+  skillName: "paigod-imagegen",
+  skillDescription: "Paigod gpt-image-2 text-to-image workflow for high-quality image generation.",
+  scopes: ["workspace:read", "project:read", "agent:read", "runtime:read", "skill:use", "shell:write"],
+  guardrails: ["Codex automatic approval", "do not print secrets", "dry-run payload before real image generation"],
+  maxConcurrentTasks: 1,
+};
 
 export async function discoverMulticaEnvironment({
   exec,
@@ -257,6 +272,138 @@ export function buildAgentConfigPlan({
   };
 }
 
+export function buildImage2AgentConfigPlan({
+  environment,
+  skillPath = DEFAULT_PAIGOD_SKILL_PATH,
+  createdAt = new Date().toISOString(),
+  confirmationToken = IMAGE2_CONFIRMATION_TOKEN,
+} = {}) {
+  const warnings = [...(environment?.warnings ?? [])];
+  if (!environment?.ok) {
+    return {
+      ok: false,
+      error: environment?.error || "Multica environment is not ready",
+      warnings,
+      createdAt,
+      preset: image2AgentPreset,
+      operations: [],
+    };
+  }
+
+  const sourceAgent = normalizeAgent(environment.sourceAgent ?? {});
+  const runtime = normalizeRuntime(environment.runtime ?? {});
+  const existingSkill = findByName(environment.skills ?? [], image2AgentPreset.skillName);
+  const existingAgent = findByName(environment.agents ?? [], image2AgentPreset.name);
+  const safeCustomArgs = hasSecretLikeCustomArgs(sourceAgent.customArgs) ? [] : sourceAgent.customArgs;
+  if ((sourceAgent.customArgs.length && !safeCustomArgs.length) || sourceAgent.customArgsRedacted) {
+    warnings.push("blocked:customArgsSecretLike");
+  }
+
+  const target = {
+    id: existingAgent?.id ?? "",
+    name: image2AgentPreset.name,
+    description: image2AgentPreset.description,
+    runtimeId: runtime.id,
+    model: sourceAgent.model || runtime.model || "",
+    visibility: sourceAgent.visibility || "private",
+    maxConcurrentTasks: image2AgentPreset.maxConcurrentTasks,
+    customArgs: safeCustomArgs,
+    instructions: buildImage2AgentInstructions({ environment }),
+  };
+
+  const operations = [
+    buildSkillOperation({ existingSkill, skillPath }),
+    buildOperation({
+      type: existingAgent ? "agent:update" : "agent:create",
+      risk: "write",
+      args: withOptionalCustomArgs(existingAgent ? [
+        "agent",
+        "update",
+        existingAgent.id,
+        "--name",
+        target.name,
+        "--description",
+        target.description,
+        "--instructions",
+        target.instructions,
+        "--runtime-id",
+        target.runtimeId,
+        "--model",
+        target.model,
+        "--max-concurrent-tasks",
+        String(target.maxConcurrentTasks),
+        "--visibility",
+        target.visibility,
+        "--output",
+        "json",
+      ] : [
+        "agent",
+        "create",
+        "--name",
+        target.name,
+        "--description",
+        target.description,
+        "--instructions",
+        target.instructions,
+        "--runtime-id",
+        target.runtimeId,
+        "--model",
+        target.model,
+        "--max-concurrent-tasks",
+        String(target.maxConcurrentTasks),
+        "--visibility",
+        target.visibility,
+        "--output",
+        "json",
+      ], target.customArgs),
+      summary: `${existingAgent ? "Update" : "Create"} runnable Codex Image2 agent ${target.name}.`,
+    }),
+    buildOperation({
+      type: "agent:skills:add",
+      risk: "write",
+      args: [
+        "agent",
+        "skills",
+        "add",
+        existingAgent?.id || "__TARGET_AGENT_ID__",
+        "--skill-ids",
+        existingSkill?.id || "__PAIGOD_IMAGEGEN_SKILL_ID__",
+        "--output",
+        "json",
+      ],
+      summary: `Bind ${image2AgentPreset.skillName} skill to ${target.name}.`,
+      requiresTargetAgentId: true,
+    }),
+  ];
+
+  return {
+    ok: true,
+    error: null,
+    createdAt,
+    confirmationToken,
+    mode: existingAgent ? "update" : "create",
+    preset: image2AgentPreset,
+    target,
+    skill: {
+      id: existingSkill?.id ?? "",
+      name: image2AgentPreset.skillName,
+      path: skillPath,
+      mode: existingSkill ? "update" : "create",
+    },
+    environment: summarizeEnvironment(environment),
+    operations,
+    warnings,
+    blockedOperations: [
+      {
+        type: "agent:env:set",
+        reason:
+          "The Paigod skill reads credentials from OPENAI_API_KEY or Codex auth.json. This flow does not write secret env values into Multica.",
+      },
+    ],
+    summary: `${existingAgent ? "Update" : "Create"} ${target.name}, register ${image2AgentPreset.skillName}, and bind it for local Codex Image2 work.`,
+  };
+}
+
 export async function applyAgentConfigPlan({
   plan,
   exec,
@@ -290,9 +437,17 @@ export async function applyAgentConfigPlan({
   const run = exec ?? createDefaultExec({ cliPath, timeoutMs });
   const results = [];
   let targetAgentId = plan.target?.id || "";
+  const skillIds = {};
+  if (plan.skill?.id) {
+    skillIds.paigodImagegen = plan.skill.id;
+  }
 
   for (const operation of plan.operations) {
-    const args = operation.args.map((arg) => (arg === "__TARGET_AGENT_ID__" ? targetAgentId : arg));
+    const args = operation.args.map((arg) => {
+      if (arg === "__TARGET_AGENT_ID__") return targetAgentId;
+      if (arg === "__PAIGOD_IMAGEGEN_SKILL_ID__") return skillIds.paigodImagegen || "";
+      return arg;
+    });
     const result = await run(args);
     if (result.code !== 0) {
       results.push(formatExecutionResult(operation, args, result, "failed"));
@@ -310,6 +465,9 @@ export async function applyAgentConfigPlan({
     if ((operation.type === "agent:create" || operation.type === "agent:update") && parsed?.id) {
       targetAgentId = parsed.id;
     }
+    if ((operation.type === "skill:create" || operation.type === "skill:update") && parsed?.id) {
+      skillIds.paigodImagegen = parsed.id;
+    }
     results.push({
       ...formatExecutionResult(operation, args, result, "executed"),
       data: redactExecutionData(parsed),
@@ -320,6 +478,7 @@ export async function applyAgentConfigPlan({
     ok: true,
     mode: "execute",
     targetAgentId,
+    skillIds,
     operations: results,
     warnings: plan.warnings ?? [],
   };
@@ -516,6 +675,72 @@ function buildAgentInstructions({ preset, environment }) {
     "Guardrails:",
     ...preset.guardrails.map((guardrail) => `- ${guardrail}`),
   ].join("\n");
+}
+
+function buildImage2AgentInstructions({ environment }) {
+  const projectTitle = environment.project?.title || DEFAULT_PROJECT_TITLE;
+  const workspaceName = environment.workspace?.name || DEFAULT_WORKSPACE_NAME;
+  return [
+    `你是 ${projectTitle} 的 ${image2AgentPreset.name}，定位是高质量 Image2 生成 Agent。`,
+    "",
+    "核心职责:",
+    "- 使用本地 paigod-imagegen skill 通过 gpt-image-2-text-to-image 生成高质量位图概念图、UI mockup、产品视觉稿和资产。",
+    "- 每次真实生成前先做 dry-run，确认 endpoint、model、size、quality、输出路径和 key 来源。",
+    "- 默认使用黑白灰或用户指定配色；当用户要求产品 UI、GUI、dashboard 时，优先输出可用于实现的高保真界面概念图。",
+    "",
+    "本地环境:",
+    `- 默认 workspace: ${workspaceName}`,
+    `- Skill: ${image2AgentPreset.skillName}`,
+    `- Skill path: ${DEFAULT_PAIGOD_SKILL_PATH}`,
+    "- Model: gpt-image-2-text-to-image",
+    "- Output directory: output/imagegen/",
+    "",
+    "权限:",
+    "- 使用 Codex 自动审核权限执行本地命令。",
+    "- 不打印、不复制、不外传 API key、token、cookie、OAuth code 或其他 secret。",
+    "- 不把 auth.json、环境变量明文或代理密钥写入 Multica 评论、日志或公开交付物。",
+    "- 涉及外部发布、删除远端资源或生产写入时必须等待人类明确授权。",
+  ].join("\n");
+}
+
+function buildSkillOperation({ existingSkill, skillPath }) {
+  if (existingSkill) {
+    return buildOperation({
+      type: "skill:update",
+      risk: "write",
+      args: [
+        "skill",
+        "update",
+        existingSkill.id,
+        "--name",
+        image2AgentPreset.skillName,
+        "--description",
+        image2AgentPreset.skillDescription,
+        "--content-file",
+        skillPath,
+        "--output",
+        "json",
+      ],
+      summary: `Update Multica skill ${image2AgentPreset.skillName} from ${skillPath}.`,
+    });
+  }
+  return buildOperation({
+    type: "skill:create",
+    risk: "write",
+    args: [
+      "skill",
+      "create",
+      "--name",
+      image2AgentPreset.skillName,
+      "--description",
+      image2AgentPreset.skillDescription,
+      "--content-file",
+      skillPath,
+      "--output",
+      "json",
+    ],
+    summary: `Create Multica skill ${image2AgentPreset.skillName} from ${skillPath}.`,
+  });
 }
 
 function buildOperation({ type, risk, args, summary, requiresTargetAgentId = false }) {

@@ -82,6 +82,20 @@
     ttlOptions: ["30 minutes", "1 hour", "2 hours", "4 hours"],
     agentPresets: [
       {
+        id: "image2",
+        name: "Image2 Codex Agent",
+        role: "High-quality image generation",
+        model: "pa/gpt-5.5",
+        runtime: "local-codex",
+        permissionTemplate: "Backend Development (Default)",
+        ttl: "2 hours",
+        cliPreset: "image2",
+        skills: ["paigod-imagegen"],
+        scopes: ["workspace:read", "skill:use", "shell:write", "imagegen:write"],
+        guardrails: ["Codex auto approval", "dry-run image payload first", "no secret logging"],
+        summary: "Creates a runnable local Codex agent for high-quality Paigod image2 generation."
+      },
+      {
         id: "planner",
         name: "Planner Agent",
         role: "Plan owner",
@@ -126,6 +140,7 @@
     ],
     cliConfig: {
       confirmationToken: "APPLY-MULTICA-AGENT-CONFIG",
+      image2ConfirmationToken: "CREATE-MULTICA-IMAGE2-CODEX-AGENT",
       discover: "node src/cli.js agent-config discover --output json",
       planOut: "out/agent-config-plan.json",
       reviewOut: "out/agent-config-plan.md"
@@ -134,7 +149,7 @@
       {
         time: "2026-06-04 15:00",
         title: "Static GUI session initialized",
-        detail: "The concept screen is using local mock data only."
+        detail: "Direct file mode uses local mock data; npm run gui enables the Image2 Multica create button."
       }
     ],
     placeholderCopy: {
@@ -153,7 +168,7 @@
     templateId: "backend",
     ttl: "2 hours",
     agentConfigOpen: false,
-    agentPresetId: "planner",
+    agentPresetId: "image2",
     agentConfigStatus: "Draft",
     agentConfigFeedback: "Preview is local in the browser. Real Multica writes must run through the CLI with an explicit confirmation token.",
     records: mockData.records.slice()
@@ -483,7 +498,7 @@
     [
       "Goal restored from local mock state.",
       "Permission preview and apply actions write page-local records only.",
-      "No Multica CLI command is executed by this page."
+      "Only the Image2 create button can call the local GUI server; other controls remain local."
     ].forEach((item) => list.appendChild(el("li", "record-item", item)));
     feed.appendChild(list);
   }
@@ -571,13 +586,13 @@
     header.appendChild(el("h3", "", "Real Multica CLI Plan"));
     header.appendChild(el("span", "config-status", "Requires terminal"));
     section.appendChild(header);
-    section.appendChild(el("p", "cli-plan-note", "This static page cannot execute local commands. Use these commands from the repository root to discover, dry-run, then explicitly apply the agent setup."));
+    section.appendChild(el("p", "cli-plan-note", "Direct file mode cannot execute local commands. When opened through npm run gui, the Image2 create button calls the local server; the commands below remain reproducible terminal fallbacks."));
 
     const commands = [
       ["Discover", mockData.cliConfig.discover],
       ["Dry-run", `node src/cli.js agent-config apply --preset ${preset.cliPreset} --output json`],
       ["Save plan", `node src/cli.js agent-config plan --preset ${preset.cliPreset} --plan-out ${mockData.cliConfig.planOut} --review-out ${mockData.cliConfig.reviewOut}`],
-      ["Execute", `node src/cli.js agent-config apply --preset ${preset.cliPreset} --execute --confirm ${mockData.cliConfig.confirmationToken} --output json`]
+      ["Execute", `node src/cli.js agent-config apply --preset ${preset.cliPreset} --execute --confirm ${preset.cliPreset === "image2" ? mockData.cliConfig.image2ConfirmationToken : mockData.cliConfig.confirmationToken} --output json`]
     ];
 
     const list = el("div", "cli-command-list");
@@ -588,6 +603,15 @@
       list.appendChild(row);
     });
     section.appendChild(list);
+    if (preset.cliPreset === "image2") {
+      const button = el("button", "primary-button create-image2-agent-button");
+      button.type = "button";
+      button.disabled = state.agentConfigStatus === "Creating";
+      button.setAttribute("data-action", "create-image2-agent");
+      button.appendChild(makeIcon("spark"));
+      button.appendChild(el("span", "", state.agentConfigStatus === "Creating" ? "Creating Image2 Codex Agent" : "Create Image2 Codex Agent"));
+      section.appendChild(button);
+    }
     section.appendChild(el("p", "cli-plan-warning", "custom_env writes are blocked by design; use --custom-env-file or --custom-env-stdin only after human approval."));
     return section;
   }
@@ -681,6 +705,8 @@
         state.agentConfigFeedback = `${preset.name} preview generated. Use agent-config apply without --execute for a real CLI dry-run.`;
         appendRecord("Agent configuration previewed", `${preset.name} uses CLI preset ${preset.cliPreset}. Browser preview did not change Multica.`);
         renderAll();
+      } else if (kind === "create-image2-agent") {
+        createImage2Agent();
       } else if (kind === "apply-agent-config") {
         const preset = currentAgentPreset();
         state.agentConfigStatus = "Applied locally";
@@ -719,6 +745,49 @@
         renderAll();
       }
     });
+  }
+
+  async function createImage2Agent() {
+    const preset = currentAgentPreset();
+    if (state.agentConfigStatus === "Creating") {
+      return;
+    }
+    if (preset.cliPreset !== "image2") {
+      state.agentConfigStatus = "Blocked";
+      state.agentConfigFeedback = "Select the Image2 Codex Agent preset before creating a real Image2 agent.";
+      renderAll();
+      return;
+    }
+
+    state.agentConfigStatus = "Creating";
+    state.agentConfigFeedback = "Calling local GUI server to create or update the Multica Image2 Codex Agent...";
+    renderAll();
+
+    try {
+      const response = await fetch("/api/agent-config/image2/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirm: mockData.cliConfig.image2ConfirmationToken })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || payload.result?.error || "Image2 agent creation failed.");
+      }
+
+      const agentId = payload.result?.targetAgentId || "";
+      const skillId = payload.result?.skillIds?.paigodImagegen || "";
+      mockData.agent = "Multica++ Image2 Codex Agent";
+      mockData.runtime = "local-codex";
+      state.agentConfigStatus = "Created in Multica";
+      state.agentConfigFeedback = `Created or updated Image2 Codex Agent (${agentId}) with paigod-imagegen skill (${skillId}).`;
+      appendRecord("Image2 Codex Agent created", `Multica agent ${agentId || "unknown"} bound skill ${skillId || "unknown"}.`);
+      renderAll();
+    } catch (error) {
+      state.agentConfigStatus = "Failed";
+      state.agentConfigFeedback = error.message || String(error);
+      appendRecord("Image2 Codex Agent creation failed", state.agentConfigFeedback);
+      renderAll();
+    }
   }
 
   function init() {

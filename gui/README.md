@@ -2,7 +2,7 @@
 
 ## 如何打开
 
-当前 GUI 是可运行静态原型，可直接用浏览器打开：
+当前 GUI 可以作为静态原型直接用浏览器打开：
 
 ```text
 gui/index.html
@@ -15,10 +15,23 @@ gui/index.html
 python -m http.server 8080
 ```
 
+如果要让按钮真实创建 Multica Agent，请从仓库根目录启动本地 GUI server：
+
+```powershell
+npm run gui
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:8787/
+```
+
 ## 当前范围
 
 - 纯 HTML/CSS/JS 实现。
-- 浏览器页面使用本地预览数据，不直接读取真实 Multica 状态。
+- 直接打开静态页面时，浏览器页面只使用本地预览数据。
+- 通过 `npm run gui` 打开时，Image2 按钮会调用本地 API 执行真实 Multica CLI。
 - 首屏为 `Project`，采用三栏工作区。
 - 左侧提供 `一键配置 Agent` 按钮，用于打开本地预览 + CLI 执行计划弹层。
 - 用于验证插件控制台的信息结构、视觉密度和本地交互，不是正式集成版。
@@ -54,16 +67,19 @@ Multica 功能，也不代表插件要替代 Multica 原生导航。
 
 左侧 workspace 卡片下方还有 `一键配置 Agent` 主按钮。该按钮打开本地弹层，
 用于选择 Agent preset、预览模型/runtime/权限模板/scope/guardrail，并展示
-真实 Multica CLI 的 discover、dry-run、保存计划和显式执行命令。浏览器内的
-Apply 只会更新页面记录；真实写入必须在终端中执行 CLI 命令。
+真实 Multica CLI 的 discover、dry-run、保存计划和显式执行命令。`Image2
+Codex Agent` preset 还提供 `Create Image2 Codex Agent`，通过本地 GUI server
+真实注册 skill、创建或更新 agent、绑定 skill，并写入审计记录。
 
 ## 本地交互
 
 - 点击左侧导航切换三栏视图或占位页。
 - 点击 `一键配置 Agent` 打开本地配置弹层。
-- 在弹层中选择 Planner / Review / Incident 等 mock preset。
+- 默认选择 `Image2 Codex Agent` preset，也可以切换 Planner / Review /
+  Incident 等 preset。
 - Preview / Apply Browser Preview 只更新页面状态和 mock record。
 - 弹层里的 `Real Multica CLI Plan` 展示可在仓库根目录运行的真实命令。
+- `Create Image2 Codex Agent` 会 POST 到 `/api/agent-config/image2/create`。
 - Plan 当前步骤高亮。
 - 权限模板、TTL 和审批开关改变本地预览。
 - Preview / Apply 按钮只写入页面内 mock record。
@@ -77,15 +93,27 @@ node src\cli.js agent-config discover --output json
 node src\cli.js agent-config plan --preset planner --plan-out out\agent-config-plan.json --review-out out\agent-config-plan.md
 node src\cli.js agent-config apply --preset planner --output json
 node src\cli.js agent-config apply --preset planner --execute --confirm APPLY-MULTICA-AGENT-CONFIG --output json
+node src\cli.js agent-config apply --preset image2 --execute --confirm CREATE-MULTICA-IMAGE2-CODEX-AGENT --output json
 ```
 
 `apply` 默认是 dry-run，不写 Multica。真实执行必须同时提供 `--execute` 和确认
 token。CLI 会按当前本地环境选择 `SparkProject` workspace、`MulticaPlusPlus`
 project、`Codex Full Access Worker` 源 agent 和在线 Codex runtime。
 
+Image2 流程会：
+
+- 用 `C:\Users\PPIO\.codex\skills\paigod-imagegen\SKILL.md` 创建或更新
+  `paigod-imagegen` skill。
+- 创建或更新 `Multica++ Image2 Codex Agent`。
+- 将 `paigod-imagegen` skill 绑定到该 agent。
+- 使用 Codex 自动审核配置继承当前本机 Codex Full Access Worker 的安全
+  custom args。
+- 把审计事件追加到 `out/agent-config-events.jsonl`。
+
 ## 明确边界
 
-- 浏览器页面不直接调用真实 Multica CLI。
+- 静态浏览器页面不直接调用真实 Multica CLI；只有 `npm run gui` 启动的本地
+  server 会执行真实 CLI。
 - 浏览器页面不写 Multica metadata。
 - 一键配置 Agent 的真实创建、更新和 skill 分配只通过 `src/cli.js agent-config`
   执行。
@@ -113,6 +141,7 @@ project、`Codex Full Access Worker` 源 agent 和在线 Codex runtime。
 - 左侧 `一键配置 Agent` 按钮可打开配置弹层。
 - 弹层可选择 preset，Preview / Apply 可写入页面内记录反馈。
 - 弹层展示真实 `node src/cli.js agent-config ...` 命令。
+- `Image2 Codex Agent` preset 的创建按钮可调用本地 API 并展示 agent/skill id。
 - `agent-config apply` 不带 `--execute` 时只返回 dry-run 计划。
 - `Project` 首屏显示三栏，其余导航只进入占位视图。
 - 运行 `npm test`。

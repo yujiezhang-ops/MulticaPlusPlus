@@ -26,8 +26,9 @@ Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica
 ## GUI-first 方向
 
 当前产品优先级已经调整为先完成插件控制台，再按界面补齐功能。首版 GUI 的
-浏览器页面仍使用本地预览数据，不会直接执行本机命令；真实 Multica Agent
-配置通过仓库内 CLI 桥完成。
+浏览器页面可以作为本地预览打开；如果使用 `npm run gui` 启动本地服务，
+`一键配置 Agent` 弹层中的 Image2 按钮会通过本地 API 调用 Multica CLI，
+真实创建或更新一个可运行的 Codex Image2 Agent。
 
 首屏只突出三栏：
 
@@ -43,9 +44,9 @@ Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica
 这些导航项在首版中只作为视觉壳和占位视图，不代表 Multica++ 接管 Multica 原生
 项目、agent、run、environment 或 data 管理能力。真实产品能力仍收敛在三栏：
 `Goal`、`Plan` 和 `Agent Permission Setup`。
-`一键配置 Agent` 当前只做 preset 选择、配置预览、mock 应用和页面记录反馈，
-不直接创建或修改真实 Multica agent。弹层会展示对应的真实 CLI 命令，用户在
-终端中执行 dry-run 或显式确认后才会写入 Multica。
+`一键配置 Agent` 当前支持两种路径：浏览器预览按钮只更新页面记录；`Image2
+Codex Agent` preset 下的 `Create Image2 Codex Agent` 会调用本地 GUI server，
+注册 `paigod-imagegen` skill，并创建或更新真实 Multica Codex Agent。
 
 ## 快速开始
 
@@ -60,6 +61,22 @@ npm install
 ```bash
 npm test
 ```
+
+启动本地 GUI server：
+
+```bash
+npm run gui
+```
+
+打开 `http://127.0.0.1:8787/` 后，点击左侧 `一键配置 Agent`，保持默认
+`Image2 Codex Agent` preset，再点击 `Create Image2 Codex Agent`。该按钮会：
+
+- 读取当前机器的 Multica daemon、workspace、project、runtime、agent、skills。
+- 用 `C:\Users\PPIO\.codex\skills\paigod-imagegen\SKILL.md` 创建或更新
+  `paigod-imagegen` skill。
+- 创建或更新 `Multica++ Image2 Codex Agent`。
+- 绑定 `paigod-imagegen` skill 到该 agent。
+- 把审计记录追加到 `out/agent-config-events.jsonl`。
 
 用示例 JSON 生成审阅材料：
 
@@ -98,11 +115,18 @@ node src/cli.js agent-config plan \
 # dry-run apply：默认只显示将执行的写操作
 node src/cli.js agent-config apply --preset planner --output json
 
-# 真实执行：必须显式传入确认 token
+# 真实执行：普通 planner preset 必须显式传入确认 token
 node src/cli.js agent-config apply \
   --preset planner \
   --execute \
   --confirm APPLY-MULTICA-AGENT-CONFIG \
+  --output json
+
+# 真实执行：Image2 Codex Agent
+node src/cli.js agent-config apply \
+  --preset image2 \
+  --execute \
+  --confirm CREATE-MULTICA-IMAGE2-CODEX-AGENT \
   --output json
 ```
 
@@ -132,6 +156,7 @@ node src/cli.js list --ledger out/ledger.jsonl --output json
 - `src/multica-client.js`：Multica CLI 只读 adapter。
 - `src/multica-mapper.js`：真实 Multica 数据到 Runtime Agent Spec 的映射。
 - `src/agent-config.js`：一键配置 Agent 的 Multica CLI 探测、计划和受控执行。
+- `src/gui-server.js`：本地 GUI server 和按钮触发的真实 Image2 Agent 创建 API。
 - `examples/`：issue assignment、comment mention、autopilot run 示例输入。
 - `ops/monitoring/`：本地监控记录、更新日志、快照和备份目录。
 

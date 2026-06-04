@@ -7,6 +7,7 @@ import test from "node:test";
 
 import {
   applyAgentConfigPlan,
+  buildImage2AgentConfigPlan,
   buildAgentConfigPlan,
   discoverMulticaEnvironment,
 } from "./agent-config.js";
@@ -258,6 +259,103 @@ test("plans an update when the target agent already exists", () => {
   assert.deepEqual(update.args.slice(0, 3), ["agent", "update", "agent-existing"]);
 });
 
+test("builds an image2 Codex agent plan that creates the local Paigod skill and binds it", () => {
+  const plan = buildImage2AgentConfigPlan({
+    environment: localEnvironment(),
+    skillPath: "C:\\Users\\PPIO\\.codex\\skills\\paigod-imagegen\\SKILL.md",
+    createdAt: "2026-06-04T09:00:00.000Z",
+  });
+
+  assert.equal(plan.ok, true);
+  assert.equal(plan.target.name, "Multica++ Image2 Codex Agent");
+  assert.equal(plan.target.runtimeId, "rt-codex");
+  assert.equal(plan.target.model, "pa/gpt-5.5");
+  assert.equal(plan.confirmationToken, "CREATE-MULTICA-IMAGE2-CODEX-AGENT");
+  assert.match(plan.target.instructions, /高质量 Image2 生成 Agent/);
+  assert.match(plan.target.instructions, /paigod-imagegen/);
+
+  assert.deepEqual(plan.operations.map((operation) => operation.type), [
+    "skill:create",
+    "agent:create",
+    "agent:skills:add",
+  ]);
+  const skillCreate = plan.operations[0];
+  assert.deepEqual(skillCreate.args.slice(0, 2), ["skill", "create"]);
+  assert.ok(skillCreate.args.includes("--content-file"));
+  assert.ok(skillCreate.args.includes("C:\\Users\\PPIO\\.codex\\skills\\paigod-imagegen\\SKILL.md"));
+
+  const agentCreate = plan.operations[1];
+  assert.deepEqual(agentCreate.args.slice(0, 2), ["agent", "create"]);
+  assert.ok(agentCreate.args.includes("--custom-args"));
+  assert.ok(agentCreate.args.includes("pa/gpt-5.5"));
+
+  const bind = plan.operations[2];
+  assert.equal(bind.args[3], "__TARGET_AGENT_ID__");
+  assert.equal(bind.args[5], "__PAIGOD_IMAGEGEN_SKILL_ID__");
+});
+
+test("image2 plan updates existing Paigod skill and existing image2 agent", () => {
+  const plan = buildImage2AgentConfigPlan({
+    environment: localEnvironment({
+      skills: [{ id: "skill-existing", name: "paigod-imagegen" }],
+      agents: [
+        ...localEnvironment().agents,
+        { id: "agent-existing", name: "Multica++ Image2 Codex Agent", runtime_id: "rt-codex" },
+      ],
+    }),
+    skillPath: "C:\\Users\\PPIO\\.codex\\skills\\paigod-imagegen\\SKILL.md",
+  });
+
+  assert.equal(plan.ok, true);
+  assert.deepEqual(plan.operations.map((operation) => operation.type), [
+    "skill:update",
+    "agent:update",
+    "agent:skills:add",
+  ]);
+  assert.deepEqual(plan.operations[0].args.slice(0, 3), ["skill", "update", "skill-existing"]);
+  assert.deepEqual(plan.operations[1].args.slice(0, 3), ["agent", "update", "agent-existing"]);
+  assert.equal(plan.operations[2].args[3], "agent-existing");
+  assert.equal(plan.operations[2].args[5], "skill-existing");
+});
+
+test("execute image2 plan resolves created skill id before binding it to the created agent", async () => {
+  const plan = buildImage2AgentConfigPlan({
+    environment: localEnvironment(),
+    skillPath: "C:\\Users\\PPIO\\.codex\\skills\\paigod-imagegen\\SKILL.md",
+  });
+  const calls = [];
+
+  const result = await applyAgentConfigPlan({
+    plan,
+    execute: true,
+    confirm: "CREATE-MULTICA-IMAGE2-CODEX-AGENT",
+    exec: async (args) => {
+      calls.push(args);
+      if (args[0] === "skill" && args[1] === "create") {
+        return jsonResult({ id: "skill-created", name: "paigod-imagegen" });
+      }
+      if (args[0] === "agent" && args[1] === "create") {
+        return jsonResult({ id: "agent-created", name: "Multica++ Image2 Codex Agent" });
+      }
+      if (args[0] === "agent" && args[1] === "skills") {
+        return jsonResult([{ id: "skill-created", name: "paigod-imagegen" }]);
+      }
+      throw new Error(`unexpected ${args.join(" ")}`);
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.targetAgentId, "agent-created");
+  assert.equal(result.skillIds.paigodImagegen, "skill-created");
+  assert.deepEqual(calls.map((args) => args.slice(0, 3)), [
+    ["skill", "create", "--name"],
+    ["agent", "create", "--name"],
+    ["agent", "skills", "add"],
+  ]);
+  assert.equal(calls[2][3], "agent-created");
+  assert.equal(calls[2][5], "skill-created");
+});
+
 test("cli agent-config apply defaults to dry-run with a mock multica executable", async () => {
   const dir = await mkdtemp(join(tmpdir(), "multica-agent-config-cli-"));
   try {
@@ -302,6 +400,83 @@ if (args[0] === "daemon" && args[1] === "status") {
 
     const calls = (await readFile(callsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     assert.equal(calls.some((args) => args[0] === "agent" && args[1] === "create"), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli agent-config apply can execute the image2 preset with a mock multica executable", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-image2-cli-"));
+  try {
+    const mockClient = join(dir, "mock-multica.js");
+    const callsPath = join(dir, "calls.jsonl");
+    const skillPath = join(dir, "SKILL.md");
+    await writeFile(skillPath, "---\nname: paigod-imagegen\n---\n# Paigod Imagegen\n", "utf8");
+    await writeFile(mockClient, `#!/usr/bin/env node
+const { appendFileSync } = await import("node:fs");
+const callsPath = ${JSON.stringify(callsPath)};
+const args = process.argv.slice(2);
+appendFileSync(callsPath, JSON.stringify(args) + "\\n");
+function out(value) { process.stdout.write(JSON.stringify(value)); }
+if (args[0] === "daemon" && args[1] === "status") {
+  process.stdout.write("Daemon:      running\\nVersion:     0.3.15\\n");
+} else if (args[0] === "workspace" && args[1] === "list") {
+  out([{ id: "ws-1", name: "SparkProject", slug: "sparkproject" }]);
+} else if (args[0] === "project" && args[1] === "list") {
+  out([{ id: "project-1", title: "MulticaPlusPlus", workspace_id: "ws-1" }]);
+} else if (args[0] === "runtime" && args[1] === "list") {
+  out([{ id: "rt-codex", provider: "codex", name: "Codex Local", status: "online" }]);
+} else if (args[0] === "agent" && args[1] === "list") {
+  out([{ id: "agent-source", name: "Codex Full Access Worker", model: "pa/gpt-5.5", runtime_id: "rt-codex", custom_args: ["-c", "approval_policy=never"] }]);
+} else if (args[0] === "skill" && args[1] === "list") {
+  out([]);
+} else if (args[0] === "skill" && args[1] === "create") {
+  out({ id: "skill-created", name: "paigod-imagegen" });
+} else if (args[0] === "agent" && args[1] === "create") {
+  out({ id: "agent-created", name: "Multica++ Image2 Codex Agent" });
+} else if (args[0] === "agent" && args[1] === "skills" && args[2] === "add") {
+  out([{ id: "skill-created", name: "paigod-imagegen" }]);
+} else {
+  console.error("unexpected command", args.join(" "));
+  process.exit(1);
+}
+`);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        "src/cli.js",
+        "agent-config",
+        "apply",
+        "--cli-path",
+        mockClient,
+        "--preset",
+        "image2",
+        "--skill-path",
+        skillPath,
+        "--execute",
+        "--confirm",
+        "CREATE-MULTICA-IMAGE2-CODEX-AGENT",
+        "--output",
+        "json",
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.targetAgentId, "agent-created");
+    assert.equal(payload.skillIds.paigodImagegen, "skill-created");
+
+    const calls = (await readFile(callsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(calls.slice(-3).map((args) => args.slice(0, 3)), [
+      ["skill", "create", "--name"],
+      ["agent", "create", "--name"],
+      ["agent", "skills", "add"],
+    ]);
+    assert.equal(calls.at(-1)[3], "agent-created");
+    assert.equal(calls.at(-1)[5], "skill-created");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
