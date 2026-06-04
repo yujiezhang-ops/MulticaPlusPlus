@@ -7,27 +7,27 @@
     runtime: "local-docker",
     runStatus: "Running",
     goal: {
-      objective: "Implement user authentication with email verification and role-based access control.",
-      owner: "admin",
+      objective: "Ship a GUI-first Multica++ control console for Goal, Plan, and one-click Agent permission setup.",
+      owner: "Codex monitoring session",
       status: "Running",
-      completedSteps: 5,
+      completedSteps: 6,
       totalSteps: 9,
-      progress: 56,
+      progress: 67,
       lastSaved: "2 minutes ago",
       latestUpdateTime: "2 minutes ago",
       latestUpdate:
-        "Completed database schema for users and roles. Moving on to implement email verification service."
+        "Static GUI, local server bridge, preset preview, and Image2 Agent creation flow are in place. Current pass is visual QA and layout polish."
     },
     planItems: [
-      { number: 1, task: "Define data models for users and roles", status: "done", dependencies: "--" },
-      { number: 2, task: "Create database migrations", status: "done", dependencies: "1" },
-      { number: 3, task: "Implement user registration API", status: "done", dependencies: "1, 2" },
-      { number: 4, task: "Implement email verification service", status: "running", dependencies: "2" },
-      { number: 5, task: "Integrate email provider (SMTP)", status: "pending", dependencies: "4" },
-      { number: 6, task: "Implement login API", status: "pending", dependencies: "3, 4" },
-      { number: 7, task: "Implement RBAC middleware", status: "pending", dependencies: "3" },
-      { number: 8, task: "Add role management APIs", status: "blocked", dependencies: "7" },
-      { number: 9, task: "Write tests and documentation", status: "pending", dependencies: "5, 6, 7" }
+      { number: 1, task: "Define plugin-only navigation boundary", status: "done", dependencies: "--" },
+      { number: 2, task: "Build Goal / Plan / Permission control panels", status: "done", dependencies: "1" },
+      { number: 3, task: "Add preset preview and editor flow", status: "done", dependencies: "2" },
+      { number: 4, task: "Wire local GUI server to Multica CLI", status: "done", dependencies: "3" },
+      { number: 5, task: "Create Image2 Codex Agent from browser action", status: "done", dependencies: "4" },
+      { number: 6, task: "Tighten layout density and responsive behavior", status: "running", dependencies: "2, 3" },
+      { number: 7, task: "Document preset boundary and handoff rules", status: "pending", dependencies: "6" },
+      { number: 8, task: "Persist team presets beyond current session", status: "blocked", dependencies: "7" },
+      { number: 9, task: "Run browser QA and Node test suite", status: "pending", dependencies: "6, 7" }
     ],
     templates: [
       {
@@ -234,6 +234,7 @@
 
   const state = {
     activeView: "control",
+    planFilter: "all",
     templateId: "backend",
     ttl: "2 hours",
     agentConfigOpen: false,
@@ -397,6 +398,25 @@
     if (!target) return;
     clear(target);
 
+    const toolbar = el("div", "plan-toolbar");
+    [
+      ["all", "All"],
+      ["running", "Running"],
+      ["pending", "Pending"],
+      ["done", "Done"],
+      ["blocked", "Blocked"]
+    ].forEach(([status, label]) => {
+      const count = status === "all"
+        ? mockData.planItems.length
+        : mockData.planItems.filter((item) => item.status === status).length;
+      const button = el("button", "plan-filter", `${label} ${count}`);
+      button.type = "button";
+      button.setAttribute("data-plan-filter", status);
+      button.setAttribute("aria-pressed", state.planFilter === status ? "true" : "false");
+      toolbar.appendChild(button);
+    });
+    target.appendChild(toolbar);
+
     const table = el("table", "plan-table");
     const thead = el("thead");
     const headerRow = el("tr");
@@ -405,7 +425,10 @@
     table.appendChild(thead);
 
     const tbody = el("tbody");
-    mockData.planItems.forEach((item) => {
+    const items = state.planFilter === "all"
+      ? mockData.planItems
+      : mockData.planItems.filter((item) => item.status === state.planFilter);
+    items.forEach((item) => {
       const row = el("tr", `plan-row status-${item.status}`);
       row.setAttribute("data-plan-status", item.status);
       row.appendChild(el("td", "plan-number", String(item.number)));
@@ -419,6 +442,13 @@
       row.appendChild(el("td", "plan-deps", item.dependencies));
       tbody.appendChild(row);
     });
+    if (items.length === 0) {
+      const row = el("tr", "plan-row");
+      const cell = el("td", "plan-empty", "No plan items match this filter.");
+      cell.colSpan = 4;
+      row.appendChild(cell);
+      tbody.appendChild(row);
+    }
     table.appendChild(tbody);
     target.appendChild(table);
 
@@ -801,8 +831,15 @@
     document.addEventListener("click", (event) => {
       const nav = event.target.closest("[data-nav-target]");
       const action = event.target.closest("[data-action]");
+      const planFilter = event.target.closest("[data-plan-filter]");
       const preset = event.target.closest("[data-agent-preset]");
       const libraryPreset = event.target.closest("[data-agent-preset-id]");
+
+      if (planFilter) {
+        state.planFilter = planFilter.getAttribute("data-plan-filter") || "all";
+        renderAll();
+        return;
+      }
 
       if (libraryPreset) {
         state.selectedPresetId = libraryPreset.getAttribute("data-agent-preset-id") || state.selectedPresetId;
