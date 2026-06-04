@@ -1,11 +1,15 @@
 # Multica++
 
-Multica++ 是 Multica 的外接 Launch Review 与插件控制层。它不重做
-Multica 已经具备的任务队列、智能体配置、技能包、MCP、取消或暂停机制，而是
-把一次 agent run 的目标、计划、权限、技能、客户端能力和运行配置收敛成一个
-可见、可授权、可恢复、可审计的启动记录。
+Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica 已经具备
+的任务队列、issue、智能体配置、技能包、MCP、取消或暂停机制，而是用 `Goal`、
+`Plan` 和一键配置智能体权限，把一次 agent run 变成可见、可授权、可恢复、
+可审计的控制记录。
 
 完整产品说明见 [中文 PRD](docs/prd/MulticaPlusPlus-PRD.zh-CN.md)。
+
+当前 GUI 方向见 [GUI 计划](gui/README.md)，简化版概念图提示词位于
+`gui/assets/multica-console-simplified.prompt.md`。本地生成的参考图保存在
+`output/imagegen/`，该目录作为生成物不纳入本次 PR。
 
 ## 当前能力
 
@@ -18,6 +22,28 @@ Multica 已经具备的任务队列、智能体配置、技能包、MCP、取消
   key、MCP server、权限 scope 和风险。
 - 记录 Goal/Plan Ledger Lite：支持 draft、locked、running、completed 等状态。
 - 通过 Multica CLI 只读读取 issue、agent、runtime、skills 数据生成 spec。
+
+## GUI-first 方向
+
+当前产品优先级已经调整为先完成插件控制台，再按界面补齐功能。首版 GUI 使用
+本地 mock 数据，不接真实 Multica CLI，不写 Multica metadata。
+
+首屏只突出三栏：
+
+- `Goal`：当前目标、负责人、状态、完成度、最新更新和恢复入口。
+- `Plan`：计划步骤、状态、依赖、当前执行项和阻塞项。
+- `Agent Permission Setup`：权限模板、scope、TTL、审批、风险摘要、预览和应用。
+
+左侧导航最多保留：
+
+- `Control`
+- `Permissions`
+- `Activity`
+- `Records`
+- `Settings`
+
+`Project`、`Agents`、`Runs`、`Environments`、`Data` 不作为 Multica++ 一级入口。
+这些能力要么是 Multica 原生能力，要么应作为当前控制流中的上下文或权限资源组。
 
 ## 快速开始
 
@@ -99,25 +125,33 @@ node src/cli.js list --ledger out/ledger.jsonl --output json
 - CLI lock/list。
 - 三类任务 example。
 
-### M2：插件控制层最小闭环
+### M2：GUI-first 三栏控制台
 
-当前 backlog：
+先做本地静态 GUI 原型，用 mock 数据表达完整产品体验。GUI 不接真实 Multica
+CLI，不写 Multica metadata。
 
-- `SPA-10`：权限网关，从 risk flags 升级为短租约和审批字段。
-- `SPA-11`：Goal/Plan 可见性，initialPlan 升级为 plan item ledger。
-- `SPA-12`：Capability Bridge，本层可达探测和不可达原因。
-- `SPA-13`：Preset/Profile，一键最佳实践初始化。
-- `SPA-14`：上游兼容加固，真实响应 fixtures 和 launch record 回传。
+### M2.5：按 GUI 补齐底层能力
 
-### M3：实时控制台
+围绕三栏界面补齐：
 
-收敛已有实时流、取消、暂停和自动暂停机制，形成运行控制台。控制台应展示
-run 状态、goal/plan 进度、权限状态、capability 可达性、实时输出和恢复入口。
+- Goal/Plan ledger：步骤状态、恢复点、证据和 blocked 原因。
+- 权限短租约：TTL、审批字段、高风险确认。
+- Preset/Profile：从 issue、agent、workspace 生成默认 goal、plan 和权限模板。
+- 上游兼容：真实 CLI fixtures、fail-closed adapter 和 launch record 回传。
+
+### M3：Activity 与 Records
+
+只收敛与当前 Goal/Plan 相关的运行事件和审计记录，不重做完整 run history 或
+Multica runtime 管理。
 
 ## 非目标
 
 - 不 fork Multica daemon。
-- 不替代 Multica issue board、agent 配置、skills 或 MCP registry。
+- 不替代 Multica issue board、agent 配置、skills、MCP registry、runtime 或
+  自动化。
+- 不复刻 Multica 原生左侧导航。
+- 不做完整项目管理、issue 管理、智能体管理、运行时管理、用量中心或数据资产
+  管理。
 - 不做运行时逐字命令硬拦截。
 - 不伪造 browser、IDE 等客户端工具的真实可达性。
-
+- 不声明自动接管所有权限。
