@@ -35,21 +35,27 @@ python -m http.server 8080
 
 ## 左侧导航
 
-左侧一级导航固定为 5 项：
+当前视觉版按概念图复原 Multica-like 项目页外壳，左侧显示：
 
-- `Control`：主工作台和三栏首屏。
-- `Permissions`：权限模板、scope、TTL、审批策略和风险预览。
-- `Activity`：当前 Goal/Plan 相关事件、阻塞和恢复点。
-- `Records`：launch review、权限决策、配置变更和监控记录。
-- `Settings`：插件级设置。
+- `Overview`
+- `Project`
+- `Agents`
+- `Runs`
+- `Environments`
+- `Data`
+- `Settings`
+- `Docs`
+- `Support`
 
-不设置一级 `Project`、`Agents`、`Runs`、`Environments` 或 `Data` 入口。
+其中 `Project` 是默认视图，展示 `Goal`、`Plan` 和
+`One-click Agent Permission Setup` 三栏。其他入口只是本地占位视图，不接真实
+Multica 功能，也不代表插件要替代 Multica 原生导航。
 
 ## 本地交互
 
-- 点击左侧导航切换视图或占位页。
-- Plan 状态筛选或当前步骤高亮。
-- 权限 scope 展开查看。
+- 点击左侧导航切换三栏视图或占位页。
+- Plan 当前步骤高亮。
+- 权限模板、TTL 和审批开关改变本地预览。
 - TTL 和模板选择改变本地预览。
 - Preview / Apply 按钮只写入页面内 mock record。
 
@@ -71,11 +77,10 @@ python -m http.server 8080
 
 ## 验收清单
 
-- 桌面视口下 `Control` 首屏显示三栏：`Goal`、`Plan`、
+- 桌面视口下 `Project` 首屏显示三栏：`Goal`、`Plan`、
   `Agent Permission Setup`。
 - 移动视口下三栏按顺序堆叠。
 - 视觉以黑、白、灰为主。
-- 左侧导航只有 `Control`、`Permissions`、`Activity`、`Records`、
-  `Settings`。
-- 无一级 `Project`、`Agents`、`Runs`、`Environments`、`Data`。
+- 左侧导航视觉上接近概念图中的 Multica 项目页。
+- `Project` 首屏显示三栏，其余导航只进入占位视图。
 - 运行 `npm test`。

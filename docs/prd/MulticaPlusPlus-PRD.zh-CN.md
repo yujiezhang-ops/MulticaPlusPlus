@@ -102,22 +102,30 @@ Plan 栏用于回答“agent 准备如何完成目标，以及现在进行到哪
 
 ## 6. GUI 信息架构
 
-左侧导航最多保留 5 个入口：
+当前视觉原型为了贴近 Multica 项目页概念图，左侧复原 Multica-like 导航外壳：
 
-- `Control`：主工作台，承载 Goal、Plan 和一键权限配置。
-- `Permissions`：权限模板、scope、TTL、审批策略和风险预览。
-- `Activity`：只展示与当前 Goal/Plan 相关的运行事件、阻塞和恢复点。
-- `Records`：launch review、权限决策、配置变更和监控记录。
-- `Settings`：插件级设置，例如默认模板、记录策略和 Multica CLI 连接状态。
+- `Overview`
+- `Project`
+- `Agents`
+- `Runs`
+- `Environments`
+- `Data`
+- `Settings`
+- `Docs`
+- `Support`
 
-不作为一级入口：
+其中 `Project` 是默认工作视图，承载 Goal、Plan 和一键权限配置三栏。
 
-- `Project`：Multica 原生项目能力，插件只显示当前项目上下文。
-- `Agents`：Multica 原生智能体能力，插件只配置当前 run 的权限。
-- `Runs`：不做完整运行历史中心，只在 Activity 展示相关事件。
-- `Environments`、`Runtime`、`Skills`：交给 Multica 原生能力。
-- `Data`：作为权限资源组呈现，不做数据管理产品。
-- `Docs`、`Support`：仅作为外链或帮助菜单。
+这些入口在 M2 静态原型中只作为视觉壳和占位视图，不代表 Multica++ 接管 Multica
+原生导航能力。产品功能边界仍然是：
+
+- `Goal`：当前目标、恢复入口和目标更新。
+- `Plan`：计划步骤、依赖、当前步骤和阻塞状态。
+- `Agent Permission Setup`：权限模板、scope、TTL、审批策略、风险预览和本地 mock
+  应用动作。
+
+后续如需要独立插件导航，可再收敛为 `Control`、`Permissions`、`Activity`、
+`Records`、`Settings`，但不作为当前像素复原版的首要目标。
 
 ## 7. 路线图
 
@@ -143,7 +151,7 @@ draft。
 
 - 深色 Multica-like 控制台。
 - 三栏首屏：Goal、Plan、Agent Permission Setup。
-- 左侧导航：Control、Permissions、Activity、Records、Settings。
+- 左侧复原 Multica-like 项目页导航外壳，Project 视图承载三栏控制台。
 - 概念图与 prompt 记录。
 - 不接真实 Multica CLI，不写 Multica metadata。
 

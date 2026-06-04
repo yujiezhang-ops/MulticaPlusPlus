@@ -3,100 +3,121 @@
 
   const mockData = {
     project: "MulticaPlusPlus",
-    agent: "Codex GUI Worker",
-    runtime: "Static Browser",
-    runStatus: "Mock Active",
+    agent: "planner-agent",
+    runtime: "local-docker",
+    runStatus: "Running",
     goal: {
-      title: "Validate a GUI-first Multica++ control console before connecting real runtime data.",
-      owner: "Codex",
-      status: "running",
-      progress: 62,
-      lastUpdate: "Three-panel control view is ready for local review.",
-      resumeAvailable: true
+      objective: "Implement user authentication with email verification and role-based access control.",
+      owner: "admin",
+      status: "Running",
+      completedSteps: 5,
+      totalSteps: 9,
+      progress: 56,
+      lastSaved: "2 minutes ago",
+      latestUpdateTime: "2 minutes ago",
+      latestUpdate:
+        "Completed database schema for users and roles. Moving on to implement email verification service."
     },
     planItems: [
-      { id: "P-01", title: "Define GUI-first PRD and information architecture", status: "done", dependencies: [] },
-      { id: "P-02", title: "Create static HTML shell and control panels", status: "done", dependencies: ["P-01"] },
-      { id: "P-03", title: "Apply dark Multica-like layout and responsive rules", status: "running", dependencies: ["P-02"] },
-      { id: "P-04", title: "Wire mock plan and permission interactions", status: "running", dependencies: ["P-02"] },
-      {
-        id: "P-05",
-        title: "Connect real Multica data after prototype review",
-        status: "blocked",
-        dependencies: ["P-03", "P-04"],
-        blockedReason: "Real CLI integration is intentionally out of scope for this static prototype."
-      },
-      { id: "P-06", title: "Prepare PR update and local verification notes", status: "pending", dependencies: ["P-03"] }
+      { number: 1, task: "Define data models for users and roles", status: "done", dependencies: "--" },
+      { number: 2, task: "Create database migrations", status: "done", dependencies: "1" },
+      { number: 3, task: "Implement user registration API", status: "done", dependencies: "1, 2" },
+      { number: 4, task: "Implement email verification service", status: "running", dependencies: "2" },
+      { number: 5, task: "Integrate email provider (SMTP)", status: "pending", dependencies: "4" },
+      { number: 6, task: "Implement login API", status: "pending", dependencies: "3, 4" },
+      { number: 7, task: "Implement RBAC middleware", status: "pending", dependencies: "3" },
+      { number: 8, task: "Add role management APIs", status: "blocked", dependencies: "7" },
+      { number: 9, task: "Write tests and documentation", status: "pending", dependencies: "5, 6, 7" }
     ],
-    permissionTemplates: [
+    templates: [
       {
-        id: "review-only",
+        id: "backend",
+        name: "Backend Development (Default)",
+        ttl: "2 hours",
+        approvalRequired: true,
+        riskLevel: "Medium Risk",
+        privileges: 18,
+        writeAccess: 3,
+        highRisk: 0,
+        scopes: [
+          { icon: "cube", group: "Code Repositories", resource: "sparkproject/*", access: "Read, Write" },
+          { icon: "database", group: "Databases", resource: "multica_pp_dev", access: "Read, Write" },
+          { icon: "lock", group: "Secret Manager", resource: "/multica_pp/*", access: "Read" },
+          { icon: "folder", group: "Object Storage", resource: "s3://multica-pp-dev/*", access: "Read, Write" },
+          { icon: "cube", group: "APIs", resource: "Internal APIs", access: "Invoke" }
+        ]
+      },
+      {
+        id: "review",
         name: "Review Only",
-        summary: "Read-only inspection for launch review and GUI validation.",
-        ttls: ["15m", "30m", "60m"],
-        defaultTtl: "30m",
+        ttl: "30 minutes",
         approvalRequired: true,
-        risk: "Low risk. No write operation is represented by this mock template.",
+        riskLevel: "Low Risk",
+        privileges: 7,
+        writeAccess: 0,
+        highRisk: 0,
         scopes: [
-          { group: "Monitoring", items: ["Read local monitoring records", "Read launch review summaries"] },
-          { group: "Workspace", items: ["Read GUI prototype files", "Preview run context"] }
+          { icon: "folder", group: "Code Repositories", resource: "sparkproject/*", access: "Read" },
+          { icon: "database", group: "Records", resource: "launch-review/*", access: "Read" },
+          { icon: "cube", group: "APIs", resource: "Read-only status APIs", access: "Invoke" }
         ]
       },
       {
-        id: "balanced",
-        name: "Balanced Setup",
-        summary: "Short-lived setup for a prepared agent run with approval gates.",
-        ttls: ["30m", "60m", "120m"],
-        defaultTtl: "60m",
-        approvalRequired: true,
-        risk: "Medium risk in real usage. This page records only local mock events.",
-        scopes: [
-          { group: "Workspace", items: ["Read project context", "Draft permission summary"] },
-          { group: "Guardrails", items: ["Require approval before permission changes", "Require approval before policy changes"] },
-          { group: "Records", items: ["Append local mock preview record"] }
-        ]
-      },
-      {
-        id: "incident-read",
+        id: "incident",
         name: "Incident Read Window",
-        summary: "Narrow read window for blocked work and recent coordination events.",
-        ttls: ["10m", "15m", "30m"],
-        defaultTtl: "15m",
+        ttl: "15 minutes",
         approvalRequired: true,
-        risk: "Low to medium risk. Time boxed for inspection and local triage.",
+        riskLevel: "Medium Risk",
+        privileges: 11,
+        writeAccess: 1,
+        highRisk: 0,
         scopes: [
-          { group: "Activity", items: ["Read current goal events", "Read blocked plan reasons"] },
-          { group: "Records", items: ["Read permission decisions", "Read recovery notes"] }
+          { icon: "folder", group: "Code Repositories", resource: "sparkproject/*", access: "Read" },
+          { icon: "database", group: "Databases", resource: "multica_pp_dev", access: "Read" },
+          { icon: "lock", group: "Secret Manager", resource: "/multica_pp/logs", access: "Read" },
+          { icon: "cube", group: "APIs", resource: "Recovery APIs", access: "Invoke" }
         ]
       }
     ],
-    activity: [
-      "Mock goal loaded for local GUI review.",
-      "Plan filter and permission template interactions are local only.",
-      "No Multica CLI calls are made by this page."
-    ],
+    ttlOptions: ["30 minutes", "1 hour", "2 hours", "4 hours"],
     records: [
       {
         time: "2026-06-04 15:00",
         title: "Static GUI session initialized",
-        detail: "Built-in data is used for this stage. No real Multica operation is performed."
+        detail: "The concept screen is using local mock data only."
       }
-    ]
+    ],
+    placeholderCopy: {
+      overview: "Overview is represented as a visual shell only. The prototype keeps real work inside the three project panels.",
+      agents: "Agent management stays in Multica. This plugin only previews permission setup for the active agent.",
+      runs: "Run history stays in Multica. The prototype only shows the current run status in the top bar.",
+      environments: "Runtime and environment management are not implemented in this local GUI mock.",
+      data: "Data appears only as permission resource groups in this prototype.",
+      docs: "Docs is a shell link in this visual reproduction.",
+      support: "Support is a shell link in this visual reproduction."
+    }
   };
 
   const state = {
-    activeView: "control",
-    planFilter: "all",
-    templateId: "balanced",
-    ttl: "60m",
+    activeView: "project",
+    templateId: "backend",
+    ttl: "2 hours",
     records: mockData.records.slice()
   };
 
   const viewIds = {
-    control: "view-control",
+    project: "view-control",
+    permissions: "view-control",
     activity: "activity-view",
     records: "records-view",
-    settings: "settings-view"
+    settings: "settings-view",
+    overview: "placeholder-view",
+    agents: "placeholder-view",
+    runs: "placeholder-view",
+    environments: "placeholder-view",
+    data: "placeholder-view",
+    docs: "placeholder-view",
+    support: "placeholder-view"
   };
 
   function qs(selector, root = document) {
@@ -119,41 +140,39 @@
     return node;
   }
 
-  function button(text, attributes = {}) {
-    const node = el("button", attributes.className || "", text);
-    node.type = "button";
-    Object.entries(attributes).forEach(([key, value]) => {
-      if (key !== "className") node.setAttribute(key, value);
-    });
-    return node;
-  }
-
   function currentTemplate() {
-    return mockData.permissionTemplates.find((template) => template.id === state.templateId) || mockData.permissionTemplates[0];
+    return mockData.templates.find((template) => template.id === state.templateId) || mockData.templates[0];
   }
 
-  function setPressed(selector, activeValue, attribute) {
-    qsa(selector).forEach((node) => {
-      const active = node.getAttribute(attribute) === activeValue;
-      node.classList.toggle("is-active", active);
-      node.setAttribute("aria-pressed", active ? "true" : "false");
-      if (attribute === "data-nav-target") {
-        node.setAttribute("aria-current", active ? "page" : "false");
-      }
+  function statusLabel(status) {
+    const labels = {
+      done: "Done",
+      running: "Running",
+      pending: "Pending",
+      blocked: "Blocked"
+    };
+    return labels[status] || status;
+  }
+
+  function setPressed() {
+    qsa("[data-nav-target]").forEach((node) => {
+      const active = node.getAttribute("data-nav-target") === state.activeView;
+      const projectActive = state.activeView === "permissions" && node.getAttribute("data-nav-target") === "project";
+      node.classList.toggle("is-active", active || projectActive);
+      node.setAttribute("aria-current", active || projectActive ? "page" : "false");
     });
   }
 
-  function metric(label, value) {
-    const node = el("div", "metric");
-    node.appendChild(el("span", "metric-label", label));
-    node.appendChild(el("strong", "metric-value", value));
-    return node;
+  function makeIcon(name) {
+    return el("span", `inline-icon inline-icon-${name}`);
   }
 
   function renderTopbar() {
+    const project = qs("#project-value");
     const agent = qs("#agent-value");
     const runtime = qs("#runtime-value");
     const status = qs("#run-status-value");
+    if (project) project.textContent = mockData.project;
     if (agent) agent.textContent = mockData.agent;
     if (runtime) runtime.textContent = mockData.runtime;
     if (status) status.textContent = mockData.runStatus;
@@ -164,129 +183,250 @@
     if (!target) return;
     clear(target);
 
-    const heading = el("h2", "panel-title", mockData.goal.title);
-    const metrics = el("div", "metric-grid");
-    metrics.appendChild(metric("Owner", mockData.goal.owner));
-    metrics.appendChild(metric("Status", mockData.goal.status));
-    metrics.appendChild(metric("Progress", `${mockData.goal.progress}%`));
-    metrics.appendChild(metric("Resume", mockData.goal.resumeAvailable ? "Available" : "Unavailable"));
+    const objective = el("section", "goal-section");
+    objective.appendChild(el("span", "section-label", "Current Objective"));
+    objective.appendChild(el("h2", "goal-title", mockData.goal.objective));
+    target.appendChild(objective);
 
-    const progress = el("div", "progress-bar");
-    progress.setAttribute("aria-label", `Goal progress ${mockData.goal.progress}%`);
+    const meta = el("div", "goal-meta-row");
+    const owner = el("div", "goal-meta");
+    owner.appendChild(el("span", "section-label", "Owner"));
+    const ownerValue = el("span", "person-value");
+    ownerValue.appendChild(makeIcon("user"));
+    ownerValue.appendChild(el("span", "", mockData.goal.owner));
+    owner.appendChild(ownerValue);
+
+    const status = el("div", "goal-meta");
+    status.appendChild(el("span", "section-label", "Status"));
+    const statusValue = el("span", "status-chip status-running");
+    statusValue.appendChild(el("span", "status-dot"));
+    statusValue.appendChild(el("span", "", mockData.goal.status));
+    status.appendChild(statusValue);
+    meta.appendChild(owner);
+    meta.appendChild(status);
+    target.appendChild(meta);
+
+    const progressSection = el("section", "goal-section progress-section");
+    const progressHeader = el("div", "progress-header");
+    progressHeader.appendChild(el("span", "", "Progress"));
+    progressHeader.appendChild(el("span", "", `${mockData.goal.completedSteps} / ${mockData.goal.totalSteps} steps`));
+    progressHeader.appendChild(el("span", "", `${mockData.goal.progress}%`));
+    progressSection.appendChild(progressHeader);
+    const progress = el("div", "progress-track");
     const fill = el("span", "progress-fill");
     fill.style.width = `${mockData.goal.progress}%`;
     progress.appendChild(fill);
+    progressSection.appendChild(progress);
+    target.appendChild(progressSection);
 
-    target.appendChild(heading);
-    target.appendChild(metrics);
-    target.appendChild(progress);
-    target.appendChild(el("p", "panel-note", mockData.goal.lastUpdate));
+    const resume = el("section", "resume-card");
+    const resumeCopy = el("div", "");
+    resumeCopy.appendChild(el("h3", "", "Restore / Resume"));
+    resumeCopy.appendChild(el("p", "", `Last saved ${mockData.goal.lastSaved}`));
+    const resumeButton = el("button", "outline-button resume-button");
+    resumeButton.type = "button";
+    resumeButton.setAttribute("data-action", "resume-goal");
+    resumeButton.appendChild(makeIcon("play"));
+    resumeButton.appendChild(el("span", "", "Resume"));
+    resume.appendChild(resumeCopy);
+    resume.appendChild(resumeButton);
+    target.appendChild(resume);
+
+    const update = el("section", "goal-section latest-update");
+    const updateHeader = el("div", "split-header");
+    updateHeader.appendChild(el("h3", "", "Latest Goal Update"));
+    updateHeader.appendChild(el("span", "", mockData.goal.latestUpdateTime));
+    update.appendChild(updateHeader);
+    update.appendChild(el("p", "", mockData.goal.latestUpdate));
+    target.appendChild(update);
+
+    const history = el("button", "full-row-button");
+    history.type = "button";
+    history.setAttribute("data-action", "view-goal-history");
+    history.appendChild(makeIcon("clock"));
+    history.appendChild(el("span", "", "View Goal History"));
+    history.appendChild(el("span", "row-arrow"));
+    target.appendChild(history);
   }
 
   function renderPlan() {
-    const list = qs("#plan-list");
-    if (!list) return;
-    clear(list);
+    const target = qs("#plan-list");
+    if (!target) return;
+    clear(target);
 
-    const items = mockData.planItems.filter((item) => state.planFilter === "all" || item.status === state.planFilter);
-    if (!items.length) {
-      list.appendChild(el("li", "empty-state", "No plan items match this filter."));
-      return;
-    }
+    const table = el("table", "plan-table");
+    const thead = el("thead");
+    const headerRow = el("tr");
+    ["#", "Task", "Status", "Dependencies"].forEach((label) => headerRow.appendChild(el("th", "", label)));
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
 
-    items.forEach((item) => {
-      const row = el("li", `plan-item status-${item.status}`);
-      row.setAttribute("data-plan-state", item.status);
-
-      const head = el("div", "plan-item-head");
-      head.appendChild(el("span", "plan-id", item.id));
-      head.appendChild(el("strong", "plan-title", item.title));
-      head.appendChild(el("span", "status-pill", item.status));
-      row.appendChild(head);
-
-      const deps = item.dependencies.length ? item.dependencies.join(", ") : "None";
-      row.appendChild(el("p", "plan-meta", `Dependencies: ${deps}`));
-      if (item.blockedReason) row.appendChild(el("p", "blocked-reason", item.blockedReason));
-
-      list.appendChild(row);
+    const tbody = el("tbody");
+    mockData.planItems.forEach((item) => {
+      const row = el("tr", `plan-row status-${item.status}`);
+      row.setAttribute("data-plan-status", item.status);
+      row.appendChild(el("td", "plan-number", String(item.number)));
+      row.appendChild(el("td", "plan-task", item.task));
+      const statusCell = el("td", "plan-status-cell");
+      const pill = el("span", `status-inline status-${item.status}`);
+      pill.appendChild(el("span", "status-ring"));
+      pill.appendChild(el("span", "", statusLabel(item.status)));
+      statusCell.appendChild(pill);
+      row.appendChild(statusCell);
+      row.appendChild(el("td", "plan-deps", item.dependencies));
+      tbody.appendChild(row);
     });
+    table.appendChild(tbody);
+    target.appendChild(table);
+
+    const legend = el("div", "plan-legend");
+    ["done", "running", "pending", "blocked"].forEach((status) => {
+      const item = el("span", `legend-item status-${status}`);
+      item.appendChild(el("span", "status-ring"));
+      item.appendChild(el("span", "", statusLabel(status)));
+      legend.appendChild(item);
+    });
+    target.appendChild(legend);
+
+    const current = mockData.planItems.find((item) => item.status === "running");
+    const footer = el("div", "plan-current-step");
+    footer.appendChild(el("span", "", "Current Step"));
+    footer.appendChild(el("strong", "", current ? `${current.number} / ${mockData.planItems.length}` : "--"));
+    footer.appendChild(el("span", "", current ? current.task : "No active step"));
+    target.appendChild(footer);
   }
 
-  function renderPermissionTemplates() {
-    const bar = qs("#permission-template-bar");
-    if (!bar) return;
-    clear(bar);
+  function renderPermissionSummary(template) {
+    const target = qs("#permission-summary");
+    if (!target) return;
+    clear(target);
 
-    mockData.permissionTemplates.forEach((template) => {
-      bar.appendChild(button(template.name, {
-        "data-permission-template": template.id,
-        className: "template-button"
-      }));
-    });
-  }
-
-  function renderTtl(template) {
-    const select = qs("#permission-ttl");
-    if (!select) return;
-    clear(select);
-
-    if (!template.ttls.includes(state.ttl)) state.ttl = template.defaultTtl;
-    template.ttls.forEach((ttl) => {
-      const option = el("option", "", ttl);
-      option.value = ttl;
-      option.selected = ttl === state.ttl;
+    const templateRow = el("section", "permission-template-row");
+    templateRow.appendChild(el("label", "", "Permission Template"));
+    const select = el("select", "");
+    select.id = "permission-template";
+    select.setAttribute("data-permission-template", "true");
+    mockData.templates.forEach((item) => {
+      const option = el("option", "", item.name);
+      option.value = item.id;
+      option.selected = item.id === template.id;
       select.appendChild(option);
     });
+    templateRow.appendChild(select);
+    target.appendChild(templateRow);
+  }
+
+  function renderPermissionScopes(template) {
+    const target = qs("#permission-scopes");
+    if (!target) return;
+    clear(target);
+
+    const section = el("section", "scope-section");
+    const header = el("div", "split-header");
+    header.appendChild(el("h3", "", "Scope (Resource Groups)"));
+    const editButton = el("button", "ghost-button edit-button");
+    editButton.type = "button";
+    editButton.setAttribute("data-action", "edit-scopes");
+    editButton.appendChild(el("span", "", "Edit"));
+    editButton.appendChild(makeIcon("pencil"));
+    header.appendChild(editButton);
+    section.appendChild(header);
+
+    const table = el("div", "scope-table");
+    template.scopes.forEach((scope) => {
+      const row = el("div", "scope-row");
+      row.appendChild(makeIcon(scope.icon));
+      row.appendChild(el("strong", "", scope.group));
+      row.appendChild(el("span", "", scope.resource));
+      row.appendChild(el("span", "", scope.access));
+      table.appendChild(row);
+    });
+    section.appendChild(table);
+    target.appendChild(section);
+  }
+
+  function renderPermissionRisk(template) {
+    const target = qs("#permission-risk");
+    if (!target) return;
+    clear(target);
+
+    const controls = el("section", "permission-controls");
+    const ttl = el("label", "ttl-field");
+    ttl.appendChild(el("span", "", "TTL (Lease Duration)"));
+    const ttlSelect = el("select", "");
+    ttlSelect.id = "permission-ttl";
+    ttlSelect.setAttribute("data-permission-ttl", "true");
+    mockData.ttlOptions.forEach((value) => {
+      const option = el("option", "", value);
+      option.value = value;
+      option.selected = value === state.ttl;
+      ttlSelect.appendChild(option);
+    });
+    ttl.appendChild(ttlSelect);
+    controls.appendChild(ttl);
+
+    const approval = el("label", "approval-toggle");
+    approval.appendChild(el("span", "", "Approval Required"));
+    approval.appendChild(makeIcon("info"));
+    const toggle = el("input", "");
+    toggle.type = "checkbox";
+    toggle.checked = template.approvalRequired;
+    toggle.setAttribute("data-permission-approval", "true");
+    const switcher = el("span", "switch-ui");
+    approval.appendChild(toggle);
+    approval.appendChild(switcher);
+    controls.appendChild(approval);
+    target.appendChild(controls);
+
+    const risk = el("section", "risk-card");
+    const riskHeader = el("div", "split-header");
+    riskHeader.appendChild(el("h3", "", "Risk Summary"));
+    riskHeader.appendChild(el("span", "muted-link", "View Details"));
+    risk.appendChild(riskHeader);
+
+    const riskGrid = el("div", "risk-grid");
+    const meter = el("div", "risk-meter");
+    meter.appendChild(makeIcon("shield"));
+    const meterCopy = el("div", "");
+    meterCopy.appendChild(el("strong", "", template.riskLevel));
+    const bars = el("span", "risk-bars");
+    for (let index = 0; index < 5; index += 1) bars.appendChild(el("i", index < 2 ? "is-filled" : ""));
+    meterCopy.appendChild(bars);
+    meter.appendChild(meterCopy);
+    riskGrid.appendChild(meter);
+    riskGrid.appendChild(riskMetric("Privileges", template.privileges));
+    riskGrid.appendChild(riskMetric("Write Access", template.writeAccess));
+    riskGrid.appendChild(riskMetric("High Risk", template.highRisk));
+    risk.appendChild(riskGrid);
+    target.appendChild(risk);
+  }
+
+  function riskMetric(label, value) {
+    const node = el("div", "risk-metric");
+    node.appendChild(el("span", "", label));
+    node.appendChild(el("strong", "", String(value)));
+    return node;
   }
 
   function renderPermissions() {
     const template = currentTemplate();
-    renderPermissionTemplates();
-    renderTtl(template);
-
-    const approval = qs("#permission-approval-required");
-    if (approval) approval.checked = template.approvalRequired;
-
-    const summary = qs("#permission-summary");
-    if (summary) {
-      clear(summary);
-      summary.appendChild(el("h2", "panel-title", template.name));
-      summary.appendChild(el("p", "panel-note", template.summary));
-      const metrics = el("div", "metric-grid");
-      metrics.appendChild(metric("TTL", state.ttl));
-      metrics.appendChild(metric("Approval", template.approvalRequired ? "Required" : "Not required"));
-      metrics.appendChild(metric("Scopes", String(template.scopes.length)));
-      summary.appendChild(metrics);
-    }
-
-    const scopes = qs("#permission-scopes");
-    if (scopes) {
-      clear(scopes);
-      template.scopes.forEach((scope, index) => {
-        const details = el("details", "scope-group");
-        details.open = index === 0;
-        details.appendChild(el("summary", "", scope.group));
-        const items = el("ul", "scope-list");
-        scope.items.forEach((item) => items.appendChild(el("li", "", item)));
-        details.appendChild(items);
-        scopes.appendChild(details);
-      });
-    }
-
-    const risk = qs("#permission-risk");
-    if (risk) {
-      clear(risk);
-      risk.appendChild(el("p", "risk-note", template.risk));
-    }
+    if (!mockData.ttlOptions.includes(state.ttl)) state.ttl = template.ttl;
+    renderPermissionSummary(template);
+    renderPermissionScopes(template);
+    renderPermissionRisk(template);
   }
 
   function renderActivity() {
     const feed = qs("#activity-feed");
     if (!feed) return;
     clear(feed);
-    feed.appendChild(el("p", "panel-note", "Activity is a local placeholder. Runtime and daemon streams are not connected."));
-    const list = el("ul", "simple-list");
-    mockData.activity.forEach((item) => list.appendChild(el("li", "", item)));
+    feed.appendChild(el("p", "panel-note", "Activity is a local visual shell. Runtime streams are not connected."));
+    const list = el("ul", "record-list");
+    [
+      "Goal restored from local mock state.",
+      "Permission preview and apply actions write page-local records only.",
+      "No Multica CLI command is executed by this page."
+    ].forEach((item) => list.appendChild(el("li", "record-item", item)));
     feed.appendChild(list);
   }
 
@@ -311,43 +451,31 @@
     if (!panel) return;
     clear(panel);
     panel.appendChild(el("p", "panel-note", "Settings are placeholders for future plugin options."));
-    const list = el("ul", "simple-list");
+    const list = el("ul", "record-list");
     [
-      "Default template: Balanced Setup",
-      "Default TTL: 60m",
+      "Default template: Backend Development (Default)",
+      "Default TTL: 2 hours",
       "External integrations: disabled",
       "Metadata writes: disabled"
-    ].forEach((item) => list.appendChild(el("li", "", item)));
+    ].forEach((item) => list.appendChild(el("li", "record-item", item)));
     panel.appendChild(list);
   }
 
+  function renderPlaceholder() {
+    const heading = qs("#placeholder-heading");
+    const content = qs("#placeholder-content");
+    if (!heading || !content) return;
+    const label = state.activeView.charAt(0).toUpperCase() + state.activeView.slice(1);
+    heading.textContent = label;
+    clear(content);
+    content.appendChild(el("p", "panel-note", mockData.placeholderCopy[state.activeView] || "This section is a visual placeholder."));
+  }
+
   function setViewVisibility() {
-    const goalPanel = qs("#goal-panel");
-    const planPanel = qs("#plan-panel");
-    const permissionPanel = qs("#permission-panel");
-
-    Object.entries(viewIds).forEach(([view, id]) => {
-      const node = qs(`#${id}`);
-      if (node) {
-        if (view === "control") {
-          node.hidden = !(state.activeView === "control" || state.activeView === "permissions");
-        } else {
-          node.hidden = state.activeView !== view;
-        }
-      }
+    const activeId = viewIds[state.activeView] || "placeholder-view";
+    qsa("[data-view]").forEach((node) => {
+      node.hidden = node.id !== activeId;
     });
-
-    if (goalPanel) {
-      goalPanel.hidden = state.activeView !== "control";
-    }
-
-    if (planPanel) {
-      planPanel.hidden = state.activeView !== "control";
-    }
-
-    if (permissionPanel) {
-      permissionPanel.hidden = !(state.activeView === "control" || state.activeView === "permissions");
-    }
   }
 
   function appendRecord(title, detail) {
@@ -367,56 +495,48 @@
     renderActivity();
     renderRecords();
     renderSettings();
+    renderPlaceholder();
     setViewVisibility();
-    setPressed("[data-nav-target]", state.activeView, "data-nav-target");
-    setPressed("[data-plan-filter]", state.planFilter, "data-plan-filter");
-    setPressed("[data-permission-template]", state.templateId, "data-permission-template");
+    setPressed();
   }
 
   function bindEvents() {
     document.addEventListener("click", (event) => {
       const nav = event.target.closest("[data-nav-target]");
-      const plan = event.target.closest("[data-plan-filter]");
-      const template = event.target.closest("[data-permission-template]");
       const action = event.target.closest("[data-action]");
 
       if (nav) {
-        state.activeView = nav.getAttribute("data-nav-target") || "control";
+        state.activeView = nav.getAttribute("data-nav-target") || "project";
         renderAll();
         return;
       }
 
-      if (plan) {
-        state.planFilter = plan.getAttribute("data-plan-filter") || "all";
+      if (!action) return;
+      const kind = action.getAttribute("data-action");
+      const template = currentTemplate();
+      if (kind === "open-permissions") {
+        state.activeView = "permissions";
         renderAll();
-        return;
-      }
-
-      if (template) {
-        state.templateId = template.getAttribute("data-permission-template") || state.templateId;
-        state.ttl = currentTemplate().defaultTtl;
+      } else if (kind === "preview-permission") {
+        appendRecord("Permission preview generated", `${template.name} with TTL ${state.ttl} was previewed locally.`);
+      } else if (kind === "apply-permission") {
+        appendRecord("Mock apply recorded", `${template.name} was recorded locally. No permission boundary changed.`);
+      } else if (kind === "resume-goal") {
+        appendRecord("Goal resume requested", "Resume was recorded inside the local page only.");
+      } else if (kind === "view-goal-history") {
+        state.activeView = "records";
         renderAll();
-        return;
-      }
-
-      if (action) {
-        const current = currentTemplate();
-        const kind = action.getAttribute("data-action");
-        if (kind === "open-permissions") {
-          state.activeView = "permissions";
-          renderAll();
-          return;
-        }
-        if (kind === "preview-permission") {
-          appendRecord("Permission preview generated", `${current.name} with TTL ${state.ttl} was previewed locally.`);
-        }
-        if (kind === "apply-permission") {
-          appendRecord("Mock apply recorded", `${current.name} was recorded locally. No permission boundary changed.`);
-        }
+      } else if (kind === "edit-scopes") {
+        appendRecord("Scope edit opened", "Scope editing is represented as a local mock event.");
       }
     });
 
     document.addEventListener("change", (event) => {
+      if (event.target.matches("[data-permission-template]")) {
+        state.templateId = event.target.value;
+        state.ttl = currentTemplate().ttl;
+        renderAll();
+      }
       if (event.target.matches("[data-permission-ttl]")) {
         state.ttl = event.target.value;
         renderAll();
@@ -426,7 +546,7 @@
 
   function init() {
     const shell = qs("#app-shell");
-    if (shell) shell.setAttribute("data-prototype", "mock");
+    if (shell) shell.setAttribute("data-prototype", "visual-mock");
     bindEvents();
     renderAll();
   }

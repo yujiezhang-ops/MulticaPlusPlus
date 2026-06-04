@@ -34,16 +34,13 @@ Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica
 - `Plan`：计划步骤、状态、依赖、当前执行项和阻塞项。
 - `Agent Permission Setup`：权限模板、scope、TTL、审批、风险摘要、预览和应用。
 
-左侧导航最多保留：
+当前视觉原型按概念图一比一复原 Multica-like 项目页外壳，因此左侧会显示
+`Overview`、`Project`、`Agents`、`Runs`、`Environments`、`Data`、`Settings`、
+`Docs`、`Support` 等导航元素。其中 `Project` 是承载三栏控制台的默认视图。
 
-- `Control`
-- `Permissions`
-- `Activity`
-- `Records`
-- `Settings`
-
-`Project`、`Agents`、`Runs`、`Environments`、`Data` 不作为 Multica++ 一级入口。
-这些能力要么是 Multica 原生能力，要么应作为当前控制流中的上下文或权限资源组。
+这些导航项在首版中只作为视觉壳和占位视图，不代表 Multica++ 接管 Multica 原生
+项目、agent、run、environment 或 data 管理能力。真实产品能力仍收敛在三栏：
+`Goal`、`Plan` 和 `Agent Permission Setup`。
 
 ## 快速开始
 
