@@ -1,0 +1,447 @@
+<title>Multica++ 产品需求文档：可读性评审版</title>
+
+<callout emoji="✅" background-color="light-green" border-color="green">
+  <p><b>一句话结论：</b>Multica++ 是 Multica 的 GUI-first 外接治理控制台，用 Goal、Plan 和一键智能体权限配置，让多智能体运行更可见、可授权、可恢复、可审计。</p>
+  <p><b>产品边界：</b>它不替代 Multica 原生工作台，不 fork daemon，不重做 issue、agent、runtime、skills、MCP、暂停或取消能力；它只补面向人的运行控制面。</p>
+</callout>
+
+<h1>一页总览</h1>
+
+<grid>
+  <column width-ratio="0.333333">
+    <h3>要解决什么</h3>
+    <ul>
+      <li>运行目标容易漂移。</li>
+      <li>Plan 缺少持续记录。</li>
+      <li>权限配置不直观。</li>
+      <li>中断后难以接回。</li>
+      <li>事后难以解释权限决策。</li>
+    </ul>
+  </column>
+  <column width-ratio="0.333333">
+    <h3>首版做什么</h3>
+    <ul>
+      <li>Goal 栏：目标、状态、恢复入口。</li>
+      <li>Plan 栏：步骤、依赖、当前执行项、阻塞项。</li>
+      <li>权限栏：模板、scope、TTL、审批、风险摘要。</li>
+      <li>预制体：插件预制体和会话内团队预制体。</li>
+    </ul>
+  </column>
+  <column width-ratio="0.333333">
+    <h3>先不做什么</h3>
+    <ul>
+      <li>不做完整 Multica 工作台。</li>
+      <li>不做完整 run history 或用量中心。</li>
+      <li>不写 Multica metadata。</li>
+      <li>不硬拦截 runtime 最终命令。</li>
+      <li>不绕过人工确认。</li>
+    </ul>
+  </column>
+</grid>
+
+<hr/>
+
+<h1>背景与产品判断</h1>
+
+<p>Multica 已经具备任务队列、issue、agent、squad、runtime、skills、MCP、取消、暂停和自动化等基础能力。Multica++ 的机会不是重做这些能力，而是在 Multica 之上补一个面向人的控制面：用户先看清目标、计划和权限，再决定是否继续运行。</p>
+
+<callout emoji="📌" background-color="light-yellow" border-color="yellow">
+  <p><b>核心判断：</b>多智能体协作的主要风险不在于缺少 agent，而在于运行目标、计划、权限、恢复点和审计记录没有被放到同一个可见界面里。</p>
+</callout>
+
+<table>
+  <colgroup><col span="4" width="160"/></colgroup>
+  <thead>
+    <tr>
+      <th background-color="light-gray">风险点</th>
+      <th background-color="light-gray">用户感受</th>
+      <th background-color="light-gray">Multica++ 切入点</th>
+      <th background-color="light-gray">首版验证方式</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Goal 漂移</td>
+      <td>不知道这轮 agent 到底在完成什么。</td>
+      <td>首屏 Goal 卡片、状态、恢复入口。</td>
+      <td>用户能在首屏读懂目标和当前状态。</td>
+    </tr>
+    <tr>
+      <td>Plan 断裂</td>
+      <td>看不清执行路径、当前步骤和阻塞原因。</td>
+      <td>Plan 步骤、依赖、当前执行项、blocked 原因。</td>
+      <td>用户能区分 pending、running、done、blocked。</td>
+    </tr>
+    <tr>
+      <td>权限不透明</td>
+      <td>不知道 agent 可以做什么、多久有效、是否需要审批。</td>
+      <td>权限模板、scope、TTL、approval required、风险摘要。</td>
+      <td>高风险 scope 不被静默授权。</td>
+    </tr>
+    <tr>
+      <td>恢复困难</td>
+      <td>暂停或异常后不知道从哪里接回。</td>
+      <td>恢复点、最新目标更新、Plan 状态。</td>
+      <td>中断后能看到最后可信恢复点。</td>
+    </tr>
+    <tr>
+      <td>审计不足</td>
+      <td>事后说不清为何授予某些能力。</td>
+      <td>权限决策、配置变更、恢复动作记录。</td>
+      <td>关键动作可追踪、可复盘。</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr/>
+
+<h1>产品定位</h1>
+
+<callout emoji="💡" background-color="light-blue" border-color="blue">
+  <p><b>定位：</b>Multica++ 是 Multica 的外接治理控制台，不是新的 Multica 工作台。</p>
+</callout>
+
+<grid>
+  <column width-ratio="0.5">
+    <h2>负责</h2>
+    <ul>
+      <li>展示并维护一次 agent run 的 Goal。</li>
+      <li>展示 Plan 步骤、状态、依赖、当前执行项和恢复入口。</li>
+      <li>提供一键智能体权限配置，覆盖模板、scope、TTL、审批和风险预览。</li>
+      <li>将运行上下文、权限决策和恢复记录沉淀为可审计记录。</li>
+      <li>后续接入 Runtime Agent Spec、Goal/Plan ledger 和权限短租约。</li>
+    </ul>
+  </column>
+  <column width-ratio="0.5">
+    <h2>不负责</h2>
+    <ul>
+      <li>不替代 Multica 的项目、issue、agent、squad、runtime、skills、MCP 或自动化。</li>
+      <li>不复刻 Multica 左侧原生导航。</li>
+      <li>不做完整 issue、agent、runtime、run history 或用量管理。</li>
+      <li>不 fork Multica daemon，不做运行时逐字命令硬拦截。</li>
+      <li>不声明自动接管所有权限，也不绕过人工确认。</li>
+    </ul>
+  </column>
+</grid>
+
+<h2>目标用户</h2>
+
+<table>
+  <colgroup><col span="3" width="180"/></colgroup>
+  <thead>
+    <tr>
+      <th background-color="light-gray">用户类型</th>
+      <th background-color="light-gray">核心诉求</th>
+      <th background-color="light-gray">Multica++ 给到的价值</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>多 agent 协作负责人</td>
+      <td>快速确认运行目标、计划和权限边界。</td>
+      <td>首屏汇总 Goal、Plan 和权限。</td>
+    </tr>
+    <tr>
+      <td>Agent operator</td>
+      <td>任务中断、暂停或异常后恢复到可信状态。</td>
+      <td>展示恢复入口、当前步骤和阻塞原因。</td>
+    </tr>
+    <tr>
+      <td>安全敏感团队</td>
+      <td>需要短租约、审批、风险摘要和权限记录。</td>
+      <td>用权限模板、TTL 和审批字段约束高风险能力。</td>
+    </tr>
+    <tr>
+      <td>内部 Multica 使用团队</td>
+      <td>不替换 Multica 的前提下提高可控性。</td>
+      <td>外接治理控制台，复用原生能力。</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr/>
+
+<h1>核心体验</h1>
+
+<table>
+  <colgroup><col span="4" width="160"/></colgroup>
+  <thead>
+    <tr>
+      <th background-color="light-gray">模块</th>
+      <th background-color="light-gray">回答的问题</th>
+      <th background-color="light-gray">首版展示</th>
+      <th background-color="light-gray">成功标准</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Goal</b></td>
+      <td>这轮 agent 工作到底要完成什么？</td>
+      <td>当前目标、负责人或触发来源、状态与完成度、最新目标更新、恢复或继续入口。</td>
+      <td>用户能在首屏读懂本次运行目标；目标状态能和 Plan 进度对应；中断后能看到最后可信恢复点。</td>
+    </tr>
+    <tr>
+      <td><b>Plan</b></td>
+      <td>agent 准备如何完成目标，现在进行到哪里？</td>
+      <td>有序步骤、pending/running/done/blocked 状态、依赖、当前执行项高亮、阻塞项和后续动作。</td>
+      <td>用户能看清执行路径；当前步骤、阻塞步骤和完成步骤明确；后续可承载 ledger 状态、证据和更新时间。</td>
+    </tr>
+    <tr>
+      <td><b>Agent Permission Setup</b></td>
+      <td>这轮 agent 可以做什么，多久有效，是否需要审批？</td>
+      <td>权限模板、scope/resource group、TTL lease、approval required、风险摘要、预览配置和应用权限按钮。</td>
+      <td>用户不用进入 Multica 原生配置也能理解权限边界；高风险 scope 不被静默授权；权限配置可记录和复盘。</td>
+    </tr>
+    <tr>
+      <td><b>Agent 预制体体系</b></td>
+      <td>如何把团队实践沉淀为可复用配置？</td>
+      <td>插件预制体、团队预制体、默认 Agent 名称、instructions、Preview dry-run、Create Agent。</td>
+      <td>用户能从共同工作环境沉淀默认 skills、MCP、instructions、runtime、权限、TTL、审批和环境配置路径提示。</td>
+    </tr>
+  </tbody>
+</table>
+
+<callout emoji="⚠️" background-color="light-orange" border-color="orange">
+  <p><b>首版边界：</b>第一版 GUI server 支持创建当前会话内的团队预制体，不写 Multica metadata，不写仓库文件，也不持久化。MCP 和 secret env 只展示为配置提示和阻断项，不声明已经写入。</p>
+</callout>
+
+<hr/>
+
+<h1>GUI 信息架构</h1>
+
+<p>当前 GUI 左侧是 Multica++ 插件导航，不复刻 Multica 原生工作台。一级入口最多保留五个，避免把插件做成另一个完整 Multica。</p>
+
+<grid>
+  <column width-ratio="0.4">
+    <h2>插件导航</h2>
+    <ul>
+      <li><code>Control</code>：默认工作视图，承载 Goal、Plan 和权限配置三栏。</li>
+      <li><code>Permissions</code>：权限模板、scope、TTL 和审批策略。</li>
+      <li><code>Activity</code>：与当前 Goal/Plan 相关的事件流。</li>
+      <li><code>Records</code>：审计记录和恢复记录。</li>
+      <li><code>Settings</code>：插件自身设置。</li>
+    </ul>
+  </column>
+  <column width-ratio="0.6">
+    <h2>保留在 Multica 原生侧</h2>
+    <ul>
+      <li>Project、Issues、Agents、Runs、Environments、Data、Skills、MCP 和 runtime settings。</li>
+      <li>Multica++ 可以展示 Native Multica 边界说明，但不提供这些能力的完整管理页面。</li>
+      <li>左侧额外展示 Plugin Presets 和 Team Presets，用户从预制体进入配置编辑器。</li>
+    </ul>
+  </column>
+</grid>
+
+<h2>Control 首屏三栏</h2>
+
+<table>
+  <colgroup><col span="3" width="190"/></colgroup>
+  <thead>
+    <tr>
+      <th background-color="light-gray">左栏：Goal</th>
+      <th background-color="light-gray">中栏：Plan</th>
+      <th background-color="light-gray">右栏：Agent Permission Setup</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>当前目标、状态、恢复入口和目标更新。</td>
+      <td>计划步骤、依赖、当前步骤和阻塞状态。</td>
+      <td>权限模板、scope、TTL、审批策略、风险预览和本地 mock 应用动作。</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr/>
+
+<h1>路线图</h1>
+
+<table>
+  <colgroup><col span="5" width="150"/></colgroup>
+  <thead>
+    <tr>
+      <th background-color="light-gray">阶段</th>
+      <th background-color="light-gray">目标</th>
+      <th background-color="light-gray">当前状态</th>
+      <th background-color="light-gray">输出</th>
+      <th background-color="light-gray">明确不做</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>M0</b><br/>Launch Review 与基础 spec</td>
+      <td>不 fork Multica，生成可审阅 Runtime Agent Spec、review markdown 和 ledger draft。</td>
+      <td>已完成。</td>
+      <td>Runtime Agent Spec、review markdown、ledger draft。</td>
+      <td>不接 GUI，不写 Multica metadata。</td>
+    </tr>
+    <tr>
+      <td><b>M1</b><br/>真实数据到 spec</td>
+      <td>从真实 issue、agent、runtime、skills 只读数据生成 Runtime Agent Spec。</td>
+      <td>已基本完成。</td>
+      <td>模块拆分、schema v1、Multica CLI 只读 adapter、真实数据映射、CLI lock/list、三类 example。</td>
+      <td>不做写入式集成。</td>
+    </tr>
+    <tr>
+      <td><b>M2</b><br/>GUI-first 三栏控制台</td>
+      <td>先做本地静态 GUI 原型，用 mock 数据表达完整产品体验。</td>
+      <td>下一阶段重点。</td>
+      <td>深色 Multica-like 控制台、Goal/Plan/Agent Permission Setup 三栏、插件导航、预制体区域、概念图与 prompt 记录。</td>
+      <td>不接真实 Multica CLI，不写 Multica metadata。</td>
+    </tr>
+    <tr>
+      <td><b>M2.5</b><br/>按 GUI 补底层能力</td>
+      <td>让三栏界面逐步接入真实能力。</td>
+      <td>规划中。</td>
+      <td>Goal/Plan ledger、权限短租约、Preset/Profile、真实 CLI fixtures、fail-closed adapter、launch record 回传。</td>
+      <td>Squad 先预览后接入。</td>
+    </tr>
+    <tr>
+      <td><b>M3</b><br/>Activity 与 Records</td>
+      <td>收敛与当前 Goal/Plan 相关的实时事件和审计记录。</td>
+      <td>规划中。</td>
+      <td>Activity 事件流、Records 审计记录、暂停、恢复、失败和权限变更记录。</td>
+      <td>不重做完整 run history 或 Multica runtime 管理。</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>M2.5 优先级</h2>
+
+<ol>
+  <li seq="auto"><b>Goal/Plan ledger：</b>支持步骤状态、恢复点、证据和 blocked 原因。</li>
+  <li seq="auto"><b>权限短租约：</b>支持 TTL、审批字段、高风险自动要求确认。</li>
+  <li seq="auto"><b>Preset/Profile：</b>从团队共同环境沉淀默认 skills、MCP、instructions、runtime、权限、TTL、审批和环境配置路径提示；支持用户修改后创建 Agent。</li>
+  <li seq="auto"><b>上游兼容：</b>真实 CLI fixtures、fail-closed adapter 和 launch record 回传。</li>
+</ol>
+
+<hr/>
+
+<h1>成功指标</h1>
+
+<table>
+  <colgroup><col span="3" width="180"/></colgroup>
+  <thead>
+    <tr>
+      <th background-color="light-gray">指标</th>
+      <th background-color="light-gray">定义</th>
+      <th background-color="light-gray">验收口径</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>可见</td>
+      <td>用户能在首屏看到 Goal、Plan 和权限边界。</td>
+      <td>无需跳转 Multica 原生配置，即可理解当前 run。</td>
+    </tr>
+    <tr>
+      <td>可授权</td>
+      <td>高风险权限有 TTL、审批和风险摘要。</td>
+      <td>高风险 scope 不被静默授权。</td>
+    </tr>
+    <tr>
+      <td>可恢复</td>
+      <td>中断后能看到最后可信 Goal/Plan 状态。</td>
+      <td>用户知道从哪个步骤恢复、为什么 blocked。</td>
+    </tr>
+    <tr>
+      <td>可审计</td>
+      <td>权限决策、配置变更和恢复动作可追踪。</td>
+      <td>关键运行记录能形成 Records。</td>
+    </tr>
+    <tr>
+      <td>不重复建设</td>
+      <td>不替代 Multica 原生项目、issue、agent、runtime、skills 和 MCP 能力。</td>
+      <td>插件只做治理控制台，不做第二个 Multica。</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr/>
+
+<h1>风险与约束</h1>
+
+<table>
+  <colgroup><col span="4" width="160"/></colgroup>
+  <thead>
+    <tr>
+      <th background-color="light-gray">风险</th>
+      <th background-color="light-gray">影响</th>
+      <th background-color="light-gray">约束</th>
+      <th background-color="light-gray">控制方式</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>GUI-first 被误读</td>
+      <td>用户以为首版已具备全部真实运行控制能力。</td>
+      <td>首版必须明确 mock 范围。</td>
+      <td>在界面和文档中标注真实/模拟能力边界。</td>
+    </tr>
+    <tr>
+      <td>外接层能力边界</td>
+      <td>用户期待插件硬拦截 runtime 最终命令。</td>
+      <td>外接层只能做启动前审阅、配置确认和旁路记录。</td>
+      <td>推广口径中避免“接管所有权限”。</td>
+    </tr>
+    <tr>
+      <td>Multica CLI 漂移</td>
+      <td>adapter 解析失败或生成错误 spec。</td>
+      <td>需要 fixtures 和 fail-closed adapter。</td>
+      <td>真实 CLI fixtures、字段缺失警告、失败即停止。</td>
+    </tr>
+    <tr>
+      <td>高影响决策</td>
+      <td>schema、权限和模块边界变更会影响后续集成。</td>
+      <td>必须经过明确评审。</td>
+      <td>PR checklist、schema version、评审记录。</td>
+    </tr>
+    <tr>
+      <td>secret 泄露</td>
+      <td>敏感配置进入 Records 或日志。</td>
+      <td>所有 secret 只记录 key 名和风险，不记录明文值。</td>
+      <td>secret env 只做 key 级展示和风险标记。</td>
+    </tr>
+  </tbody>
+</table>
+
+<callout emoji="❗" background-color="light-red" border-color="red">
+  <p><b>安全原则：</b>不要把 Full Access 包装成默认推荐模式；不要让预制体绕过 Goal、Plan 和权限确认；不要在任何文档、日志或 Records 中记录 secret 明文值。</p>
+</callout>
+
+<hr/>
+
+<h1>内部推广口径</h1>
+
+<grid>
+  <column width-ratio="0.5">
+    <h2>推荐说法</h2>
+    <callout emoji="✅" background-color="light-green" border-color="green">
+      <p>Multica++ 是 Multica 的外接治理控制台，帮助公司内部多 agent 工作更可见、可授权、可恢复、可审计。</p>
+    </callout>
+  </column>
+  <column width-ratio="0.5">
+    <h2>避免说法</h2>
+    <ul>
+      <li>不说 Multica++ 替代 Multica。</li>
+      <li>不说 Multica++ 全自动接管权限。</li>
+      <li>不说 agent 可以不经确认获得所有权限。</li>
+      <li>不说 Multica++ 重做任务队列、skills、MCP、暂停或取消能力。</li>
+      <li>不说使用后没有风险或不需要人工监督。</li>
+    </ul>
+  </column>
+</grid>
+
+<hr/>
+
+<h1>后续行动</h1>
+
+<checkbox done="false">确认 M2 GUI-first 三栏控制台的视觉和信息架构。</checkbox>
+<checkbox done="false">补齐 Goal/Plan ledger 的字段、状态机和恢复点定义。</checkbox>
+<checkbox done="false">定义权限短租约的 TTL、审批字段和高风险 scope 规则。</checkbox>
+<checkbox done="false">整理 Plugin Presets 与 Team Presets 的首批模板。</checkbox>
+<checkbox done="false">为真实 Multica CLI adapter 建立 fixtures 和 fail-closed 测试。</checkbox>
+
+<callout emoji="🏁" background-color="light-gray" border-color="gray">
+  <p><b>最终判断：</b>Multica++ 的首要价值不是增加更多 agent，而是把一次 agent run 的目标、计划、权限和恢复点变成可见对象。先做到可控，再谈更高程度的自动化。</p>
+</callout>

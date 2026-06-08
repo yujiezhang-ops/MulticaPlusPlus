@@ -7,6 +7,7 @@
     "multica-launch-review": "./src/cli.js"
   },
   "scripts": {
+    "gui": "node src/gui-server.js",
     "test": "node --test"
   },
   "engines": {

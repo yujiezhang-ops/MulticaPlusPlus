@@ -1,0 +1,4 @@
+interface:
+  display_name: "Paigod Imagegen"
+  short_description: "Generate images with the Paigod async image proxy."
+  default_prompt: "Use paigod-imagegen to generate or check images through the Paigod async endpoint."

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agent Memory Ledger | Spark Jam Demo</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-panel">
+        <nav class="topbar" aria-label="Demo sections">
+          <span class="brand-mark">AML</span>
+          <span>Agent Memory Ledger</span>
+        </nav>
+
+        <div class="hero-copy">
+          <p class="eyebrow">Spark Jam 数据主题原型</p>
+          <h1>让 agent 的每一条记忆都有账可查</h1>
+          <p class="hero-text" id="problemText"></p>
+          <div class="hero-actions">
+            <a class="primary-action" href="#ledgerTable">查看账本</a>
+            <a class="secondary-action" href="#pitchFlow">Pitch 顺序</a>
+          </div>
+        </div>
+
+        <div class="jam-card" aria-label="Recommended topic">
+          <span class="card-kicker">首推选题</span>
+          <strong id="scenarioTitle"></strong>
+          <p id="oneLiner"></p>
+        </div>
+      </section>
+
+      <section class="dashboard-band">
+        <div class="section-heading">
+          <p class="eyebrow">Data Control Plane</p>
+          <h2>导入资料后，系统先评估再允许 agent 使用</h2>
+        </div>
+        <div class="metric-grid" id="summaryMetrics" aria-label="Ledger summary"></div>
+      </section>
+
+      <section class="workspace-grid">
+        <aside class="side-panel">
+          <div>
+            <p class="eyebrow">Demo Input</p>
+            <h2>用户任务</h2>
+            <p class="task-text">帮我为今天的 Spark Jam 选择一个数据相关选题，并准备可以现场展示的产品故事。</p>
+          </div>
+
+          <div class="flow-list">
+            <h3>主流程</h3>
+            <ol>
+              <li>导入团队资料、私有文档、agent 中间结论。</li>
+              <li>每条数据打上来源、置信度、权限、过期时间、敏感度。</li>
+              <li>agent 只使用可追溯资料，冲突和隐私风险进入人工复核。</li>
+              <li>用户撤销、修正或确认记忆后再生成最终回答。</li>
+            </ol>
+          </div>
+
+          <div class="answer-panel">
+            <h3>Agent 最终回答</h3>
+            <p id="answerText"></p>
+            <ul id="answerCaveats"></ul>
+          </div>
+        </aside>
+
+        <section class="ledger-panel" aria-labelledby="ledgerTitle">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Live Ledger</p>
+              <h2 id="ledgerTitle">Agent 记忆账本</h2>
+            </div>
+            <div class="segmented-control" aria-label="Filter memory records">
+              <button class="filter-button is-active" type="button" data-filter="all">全部</button>
+              <button class="filter-button" type="button" data-filter="usable">可用</button>
+              <button class="filter-button" type="button" data-filter="needs-review">复核</button>
+              <button class="filter-button" type="button" data-filter="rejected">拒绝</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table id="ledgerTable">
+              <thead>
+                <tr>
+                  <th>数据</th>
+                  <th>来源</th>
+                  <th>质量</th>
+                  <th>权限状态</th>
+                  <th>原因</th>
+                </tr>
+              </thead>
+              <tbody id="ledgerRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="insight-grid">
+        <div class="insight-panel">
+          <p class="eyebrow">Conflict Queue</p>
+          <h2>冲突与复核</h2>
+          <div id="conflictList"></div>
+        </div>
+
+        <div class="insight-panel">
+          <p class="eyebrow">Quality Model</p>
+          <h2>四个评分指标</h2>
+          <div class="quality-grid">
+            <div><strong>来源可信度</strong><span>source trust</span></div>
+            <div><strong>时效性</strong><span>freshness</span></div>
+            <div><strong>隐私安全</strong><span>privacy safety</span></div>
+            <div><strong>任务相关性</strong><span>task relevance</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="pitch-band" id="pitchFlow">
+        <div class="section-heading">
+          <p class="eyebrow">Jam Pitch</p>
+          <h2>5 分钟演示叙事</h2>
+        </div>
+        <div class="pitch-track" id="pitchTrack"></div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

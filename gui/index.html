@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Multica++ 控制台</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div id="app-shell">
+      <aside id="sidebar" aria-label="工作区导航">
+        <div class="product-mark">Multica++</div>
+
+        <button class="workspace-switcher" type="button" aria-label="当前工作区">
+          <span class="workspace-avatar">SP</span>
+          <span class="workspace-copy">
+            <strong>SparkProject</strong>
+            <span>工作区</span>
+          </span>
+          <span class="chevron" aria-hidden="true"></span>
+        </button>
+
+        <button id="quick-config-agent" class="agent-quick-config" type="button" data-action="open-agent-config">
+          <span class="nav-icon nav-icon-agent" aria-hidden="true"></span>
+          <span class="quick-config-copy">
+            <strong>一键配置 Agent</strong>
+            <span>预制体、运行时、权限</span>
+          </span>
+        </button>
+
+        <section class="preset-sidebar" aria-label="Agent 预制体">
+          <div class="preset-sidebar-group">
+            <h2>插件预制体</h2>
+            <div id="plugin-preset-list" class="preset-sidebar-list" aria-live="polite"></div>
+          </div>
+          <div class="preset-sidebar-group">
+            <h2>团队预制体</h2>
+            <div id="team-preset-list" class="preset-sidebar-list" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <nav class="sidebar-nav sidebar-nav-primary" aria-label="插件导航">
+          <button type="button" data-nav-target="control" aria-current="page">
+            <span class="nav-icon nav-icon-home" aria-hidden="true"></span>
+            <span>控制台</span>
+          </button>
+          <button type="button" data-nav-target="permissions">
+            <span class="nav-icon nav-icon-lock" aria-hidden="true"></span>
+            <span>权限</span>
+          </button>
+          <button type="button" data-nav-target="activity">
+            <span class="nav-icon nav-icon-play" aria-hidden="true"></span>
+            <span>活动</span>
+          </button>
+          <button type="button" data-nav-target="records">
+            <span class="nav-icon nav-icon-database" aria-hidden="true"></span>
+            <span>记录</span>
+          </button>
+          <button type="button" data-nav-target="settings">
+            <span class="nav-icon nav-icon-gear" aria-hidden="true"></span>
+            <span>设置</span>
+          </button>
+        </nav>
+
+        <nav class="sidebar-nav sidebar-nav-secondary" aria-label="Multica 原生边界">
+          <button type="button" data-nav-target="native-boundary">
+            <span class="nav-icon nav-icon-folder" aria-hidden="true"></span>
+            <span>Multica 原生</span>
+          </button>
+        </nav>
+
+        <button class="user-switcher" type="button" aria-label="当前用户">
+          <span class="user-avatar">AD</span>
+          <span>管理员</span>
+          <span class="chevron" aria-hidden="true"></span>
+        </button>
+      </aside>
+
+      <div class="workspace">
+        <header id="topbar">
+          <div class="topbar-context" aria-label="运行上下文">
+            <span class="context-item">
+              <span class="context-label">项目</span>
+              <span id="project-value" class="context-value with-chevron">MulticaPlusPlus</span>
+            </span>
+            <span class="context-item">
+              <span class="context-label">当前 Agent</span>
+              <span id="agent-value" class="context-value with-status with-chevron">planner-agent</span>
+            </span>
+            <span class="context-item">
+              <span class="context-label">运行时</span>
+              <span id="runtime-value" class="context-value">local-docker</span>
+            </span>
+            <span class="context-item">
+              <span class="context-label">运行状态</span>
+              <span id="run-status-value" class="context-value with-status">运行中</span>
+            </span>
+          </div>
+
+          <div class="topbar-actions">
+            <button type="button" id="configure-agent-permissions" class="outline-button" data-action="open-permissions">
+              <span class="button-icon nav-icon-lock" aria-hidden="true"></span>
+              <span>配置权限</span>
+            </button>
+            <button type="button" class="more-button" aria-label="更多操作">...</button>
+          </div>
+        </header>
+
+        <main class="views">
+          <section id="view-control" class="control-grid" data-view="control">
+            <section id="goal-panel" class="panel" aria-labelledby="goal-heading">
+              <header class="panel-header">
+                <span class="panel-index">1</span>
+                <h1 id="goal-heading">目标</h1>
+              </header>
+              <div id="goal-summary" class="dynamic-region" aria-live="polite"></div>
+            </section>
+
+            <section id="plan-panel" class="panel" aria-labelledby="plan-heading">
+              <header class="panel-header">
+                <span class="panel-index">2</span>
+                <h1 id="plan-heading">计划</h1>
+              </header>
+              <div id="plan-list" class="dynamic-region" aria-live="polite"></div>
+            </section>
+
+          </section>
+
+          <section id="permissions-view" class="permissions-view" data-view="permissions" hidden>
+            <section id="permission-panel" class="panel" aria-labelledby="permission-heading">
+              <header class="panel-header">
+                <span class="panel-index">1</span>
+                <h1 id="permission-heading">一键 Agent 权限配置</h1>
+              </header>
+              <div id="permission-summary" class="dynamic-region" aria-live="polite"></div>
+              <div id="permission-scopes" class="dynamic-region" aria-live="polite"></div>
+              <div id="permission-risk" class="dynamic-region" aria-live="polite"></div>
+              <div class="permission-actions">
+                <button type="button" id="preview-permission-configuration" class="outline-button" data-action="preview-permission">
+                  <span class="button-icon nav-icon-eye" aria-hidden="true"></span>
+                  <span>预览配置</span>
+                </button>
+                <button type="button" id="apply-permissions" class="primary-button" data-action="apply-permission">
+                  <span class="button-icon nav-icon-lock" aria-hidden="true"></span>
+                  <span>应用权限</span>
+                </button>
+              </div>
+              <p class="permission-footnote">权限以临时租约形式应用，并会自动过期。</p>
+            </section>
+          </section>
+
+          <section id="activity-view" class="placeholder-view" data-view="activity" hidden>
+            <header class="view-header">
+              <h1>活动</h1>
+            </header>
+            <div id="activity-feed" class="dynamic-region" aria-live="polite"></div>
+          </section>
+
+          <section id="records-view" class="placeholder-view" data-view="records" hidden>
+            <header class="view-header">
+              <h1>记录</h1>
+            </header>
+            <div id="records-list" class="dynamic-region" aria-live="polite"></div>
+          </section>
+
+          <section id="settings-view" class="placeholder-view" data-view="settings" hidden>
+            <header class="view-header">
+              <h1>设置</h1>
+            </header>
+            <div id="settings-panel" class="dynamic-region" aria-live="polite"></div>
+          </section>
+
+          <section id="placeholder-view" class="placeholder-view" data-view="placeholder" hidden>
+            <header class="view-header">
+              <h1 id="placeholder-heading">控制台</h1>
+            </header>
+            <div id="placeholder-content" class="dynamic-region" aria-live="polite"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div id="agent-config-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="agent-config-heading" hidden>
+      <section class="agent-config-dialog">
+        <header class="modal-header">
+          <div>
+              <span class="section-label">本地预览 + CLI 执行</span>
+              <h1 id="agent-config-heading">一键配置 Agent</h1>
+            </div>
+          <button type="button" class="modal-close" data-action="close-agent-config" aria-label="关闭一键 Agent 配置">×</button>
+        </header>
+
+        <div class="agent-config-body">
+          <section class="agent-config-presets" aria-labelledby="agent-config-presets-heading">
+            <h2 id="agent-config-presets-heading">预制体</h2>
+            <div id="agent-config-presets" class="preset-list" aria-live="polite"></div>
+            <section class="team-preset-create" aria-labelledby="team-preset-create-heading">
+              <h3 id="team-preset-create-heading">创建团队预制体</h3>
+              <label class="preset-edit-field">
+                <span>预制体名称</span>
+                <input id="new-preset-name" type="text" value="团队图像审核 Agent">
+              </label>
+              <label class="preset-edit-field">
+                <span>创建者</span>
+                <input id="new-preset-created-by" type="text" value="PPIO 团队">
+              </label>
+              <label class="preset-edit-field">
+                <span>说明</span>
+                <input id="new-preset-description" type="text" value="基于共享本地 Codex 环境生成的团队预制体。">
+              </label>
+              <label class="preset-edit-field">
+                <span>Instructions</span>
+                <textarea id="new-preset-instructions" rows="4">遵循团队共享的本地 Codex 工作流。先预览计划，不把 secret 写入日志，完成前运行验证。</textarea>
+              </label>
+              <button type="button" class="outline-button" data-action="create-team-preset">
+                <span class="button-icon nav-icon-agent" aria-hidden="true"></span>
+                <span>创建团队预制体</span>
+              </button>
+              <p id="new-preset-feedback" class="preset-feedback">创建当前会话内的团队预制体，不写入 Multica metadata。</p>
+            </section>
+          </section>
+
+          <section class="agent-config-preview" aria-labelledby="agent-config-preview-heading">
+            <div class="split-header">
+              <h2 id="agent-config-preview-heading">配置预览</h2>
+              <span id="agent-config-status" class="config-status">草稿</span>
+            </div>
+            <div id="agent-config-preview" class="config-preview-card" aria-live="polite"></div>
+            <section id="preset-detail" class="preset-detail-card" aria-labelledby="preset-detail-heading">
+              <div class="split-header">
+                <h2 id="preset-detail-heading">预制体编辑器</h2>
+                <span id="preset-status" class="config-status">草稿</span>
+              </div>
+              <label class="preset-edit-field">
+                <span>Agent 名称</span>
+                <input id="preset-agent-name" type="text">
+              </label>
+              <label class="preset-edit-field">
+                <span>Instructions</span>
+                <textarea id="preset-agent-instructions" rows="5"></textarea>
+              </label>
+              <div id="preset-config-summary" class="preset-config-summary" aria-live="polite"></div>
+              <p id="preset-feedback" class="preset-feedback">选择预制体后可编辑默认配置。</p>
+              <div class="modal-button-row">
+                <button type="button" class="outline-button" data-action="preview-selected-preset">
+                  <span class="button-icon nav-icon-eye" aria-hidden="true"></span>
+                  <span>预览计划</span>
+                </button>
+                <button type="button" class="primary-button" data-action="create-selected-preset-agent">
+                  <span class="button-icon nav-icon-agent" aria-hidden="true"></span>
+                  <span>创建 Agent</span>
+                </button>
+              </div>
+            </section>
+          </section>
+        </div>
+
+        <footer class="modal-actions">
+          <p id="agent-config-feedback">预览只发生在浏览器本地。真实 Multica 写入必须通过 CLI 并携带明确确认 token。</p>
+          <div class="modal-button-row">
+            <button type="button" class="outline-button" data-action="preview-agent-config">
+              <span class="button-icon nav-icon-eye" aria-hidden="true"></span>
+              <span>预览配置</span>
+            </button>
+            <button type="button" class="primary-button" data-action="apply-agent-config">
+              <span class="button-icon nav-icon-agent" aria-hidden="true"></span>
+              <span>应用浏览器预览</span>
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+  </body>
+</html>

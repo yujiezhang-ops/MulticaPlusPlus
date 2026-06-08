@@ -1,0 +1,191 @@
+[
+  {
+    "created_at": "2026-05-27T08:58:58Z",
+    "daemon_id": "019e5e12-d2d6-727a-98fa-f5967e9cbdbd",
+    "device_info": "LAPTOP-8EFEQF0F · 2.1.161 (Claude Code)",
+    "id": "b961640d-5a6b-48eb-86cf-48f48b59e37f",
+    "last_seen_at": "2026-06-05T03:04:56Z",
+    "launch_header": "claude (stream-json)",
+    "metadata": {
+      "cli_version": "0.3.16",
+      "launched_by": "",
+      "version": "2.1.161 (Claude Code)"
+    },
+    "name": "Claude (LAPTOP-8EFEQF0F)",
+    "owner_id": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "provider": "claude",
+    "runtime_mode": "local",
+    "status": "online",
+    "updated_at": "2026-06-04T14:10:43Z",
+    "visibility": "private",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "created_at": "2026-05-27T08:58:58Z",
+    "daemon_id": "019e5e12-d2d6-727a-98fa-f5967e9cbdbd",
+    "device_info": "LAPTOP-8EFEQF0F · codex-cli 0.133.0",
+    "id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+    "last_seen_at": "2026-06-05T03:04:56Z",
+    "launch_header": "codex app-server",
+    "metadata": {
+      "cli_version": "0.3.16",
+      "launched_by": "",
+      "version": "codex-cli 0.133.0"
+    },
+    "name": "Codex (LAPTOP-8EFEQF0F)",
+    "owner_id": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "provider": "codex",
+    "runtime_mode": "local",
+    "status": "online",
+    "updated_at": "2026-06-04T14:10:43Z",
+    "visibility": "private",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "created_at": "2026-05-27T08:58:58Z",
+    "daemon_id": "019e5e12-d2d6-727a-98fa-f5967e9cbdbd",
+    "device_info": "LAPTOP-8EFEQF0F · OpenClaw 2026.5.22 (a374c3a)",
+    "id": "cf06f0e3-0aae-4a96-8f2a-ec17175f5413",
+    "last_seen_at": "2026-06-05T03:04:56Z",
+    "launch_header": "openclaw agent (json)",
+    "metadata": {
+      "cli_version": "0.3.16",
+      "launched_by": "",
+      "version": "OpenClaw 2026.5.22 (a374c3a)"
+    },
+    "name": "Openclaw (LAPTOP-8EFEQF0F)",
+    "owner_id": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "provider": "openclaw",
+    "runtime_mode": "local",
+    "status": "online",
+    "updated_at": "2026-06-04T14:10:43Z",
+    "visibility": "private",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "created_at": "2026-05-27T08:58:58Z",
+    "daemon_id": "019e5e12-d2d6-727a-98fa-f5967e9cbdbd",
+    "device_info": "LAPTOP-8EFEQF0F · Hermes Agent v0.14.0 (2026.5.16)",
+    "id": "08ea1086-df8f-41ea-afa4-305059d636ae",
+    "last_seen_at": "2026-06-05T03:04:56Z",
+    "launch_header": "hermes acp",
+    "metadata": {
+      "cli_version": "0.3.16",
+      "launched_by": "",
+      "version": "Hermes Agent v0.14.0 (2026.5.16)"
+    },
+    "name": "Hermes (LAPTOP-8EFEQF0F)",
+    "owner_id": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "provider": "hermes",
+    "runtime_mode": "local",
+    "status": "online",
+    "updated_at": "2026-06-04T14:10:43Z",
+    "visibility": "private",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "created_at": "2026-05-29T02:26:25Z",
+    "daemon_id": "019e62c6-3b3a-76aa-91ec-a6c5bf391128",
+    "device_info": "DESKTOP-QLVEPII · codex-cli 0.130.0",
+    "id": "ec4e0268-11db-48e3-a489-311e123ce02d",
+    "last_seen_at": "2026-06-05T03:04:41Z",
+    "launch_header": "codex app-server",
+    "metadata": {
+      "cli_version": "0.3.16",
+      "launched_by": "",
+      "version": "codex-cli 0.130.0"
+    },
+    "name": "Codex (DESKTOP-QLVEPII)",
+    "owner_id": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "provider": "codex",
+    "runtime_mode": "local",
+    "status": "online",
+    "updated_at": "2026-06-05T00:09:44Z",
+    "visibility": "private",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "created_at": "2026-05-29T02:26:25Z",
+    "daemon_id": "019e62c6-3b3a-76aa-91ec-a6c5bf391128",
+    "device_info": "DESKTOP-QLVEPII · 0.10.0",
+    "id": "908d2752-26f8-4ae6-9238-3b750756a4ce",
+    "last_seen_at": "2026-06-05T03:04:41Z",
+    "launch_header": "gemini (stream-json)",
+    "metadata": {
+      "cli_version": "0.3.16",
+      "launched_by": "",
+      "version": "0.10.0"
+    },
+    "name": "Gemini (DESKTOP-QLVEPII)",
+    "owner_id": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "provider": "gemini",
+    "runtime_mode": "local",
+    "status": "online",
+    "updated_at": "2026-06-05T00:09:56Z",
+    "visibility": "private",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "created_at": "2026-05-29T02:26:25Z",
+    "daemon_id": "019e62c6-3b3a-76aa-91ec-a6c5bf391128",
+    "device_info": "DESKTOP-QLVEPII · 2.1.117 (Claude Code)",
+    "id": "758b0e1c-a903-4ad4-9f00-61286532f4af",
+    "last_seen_at": "2026-06-05T03:04:41Z",
+    "launch_header": "claude (stream-json)",
+    "metadata": {
+      "cli_version": "0.3.16",
+      "launched_by": "",
+      "version": "2.1.117 (Claude Code)"
+    },
+    "name": "Claude (DESKTOP-QLVEPII)",
+    "owner_id": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "provider": "claude",
+    "runtime_mode": "local",
+    "status": "online",
+    "updated_at": "2026-06-05T00:09:44Z",
+    "visibility": "private",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "created_at": "2026-06-02T02:18:05Z",
+    "daemon_id": "019e861f-8644-7797-a733-0bd225136e38",
+    "device_info": "ElysiaRED · 2.1.146 (Claude Code)",
+    "id": "4d3201c8-bbaf-4429-9315-7e553cacef5c",
+    "last_seen_at": "2026-06-05T01:29:45Z",
+    "launch_header": "claude (stream-json)",
+    "metadata": {
+      "cli_version": "0.3.16",
+      "launched_by": "",
+      "version": "2.1.146 (Claude Code)"
+    },
+    "name": "Claude (ElysiaRED)",
+    "owner_id": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "provider": "claude",
+    "runtime_mode": "local",
+    "status": "offline",
+    "updated_at": "2026-06-05T01:32:26Z",
+    "visibility": "private",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "created_at": "2026-06-02T02:18:05Z",
+    "daemon_id": "019e861f-8644-7797-a733-0bd225136e38",
+    "device_info": "ElysiaRED · OpenClaw 2026.5.18 (50a2481)",
+    "id": "51b2467c-9ec4-4bf0-af47-edbc60a90092",
+    "last_seen_at": "2026-06-05T01:28:45Z",
+    "launch_header": "openclaw agent (json)",
+    "metadata": {
+      "cli_version": "0.3.16",
+      "launched_by": "",
+      "version": "OpenClaw 2026.5.18 (50a2481)"
+    },
+    "name": "Openclaw (ElysiaRED)",
+    "owner_id": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "provider": "openclaw",
+    "runtime_mode": "local",
+    "status": "offline",
+    "updated_at": "2026-06-05T01:31:26Z",
+    "visibility": "private",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  }
+]

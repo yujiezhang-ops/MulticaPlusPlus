@@ -1,11 +1,31 @@
 # Multica Launch Review
 
+中文版说明: [README.zh-CN.md](README.zh-CN.md)
+Development constraints: [docs/development-constraints.zh-CN.md](docs/development-constraints.zh-CN.md)
+PR checklist: [docs/pr-checklist.zh-CN.md](docs/pr-checklist.zh-CN.md)
+
 External pre-run initialization layer for Multica agent tasks.
 
 This project does not fork Multica or replace its issue board, runtime daemon,
 skill registry, or autopilot system. It generates a reviewable Runtime Agent
 Spec before a task is launched, so a user can inspect the goal, runtime, skills,
 instruction overlays, capabilities, permission scopes, and initial plan.
+
+## Local GUI Prototype
+
+This branch also includes a static GUI-first prototype at `gui/index.html`.
+It is a local mock control console for reviewing `Goal`, `Plan`, and
+one-click agent permission setup before real integration work.
+
+The prototype is intentionally limited:
+
+- The browser view uses local preview data only.
+- It does not execute local commands from the static page.
+- Real one-click agent configuration is exposed through
+  `node src/cli.js agent-config ...`.
+- `agent-config apply` defaults to dry-run; real Multica writes require
+  `--execute --confirm APPLY-MULTICA-AGENT-CONFIG`.
+- It does not add a frontend build chain or runtime dependency.
 
 ## What It Produces
 
@@ -110,3 +130,6 @@ spec near Multica's task claim flow, but that becomes an upstream PR or fork.
 ```bash
 npm test
 ```
+
+Before opening a PR, read `CONTRIBUTING.md`, update `CHANGELOG.md` for
+user-visible changes, and verify the Chinese PR checklist.
