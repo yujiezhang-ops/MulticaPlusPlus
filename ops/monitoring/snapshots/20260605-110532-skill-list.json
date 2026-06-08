@@ -1,0 +1,172 @@
+[
+  {
+    "config": {
+      "origin": {
+        "provider": "codex",
+        "runtime_id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+        "source_path": "~/.codex/skills/feishu-chrome-auth",
+        "type": "runtime_local"
+      }
+    },
+    "created_at": "2026-06-04T06:37:30Z",
+    "created_by": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "Use when a Feishu/Lark CLI device-flow authorization needs browser confirmation through the Codex Chrome Extension, especially after lark-cli prints a verification_url, device_code, missing scope, or asks to authorize scopes such as docx:document:create.",
+    "id": "6f16549c-3481-4b5c-b8f7-79bafcd10e89",
+    "name": "feishu-chrome-auth",
+    "updated_at": "2026-06-04T06:37:30Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "config": {
+      "origin": {
+        "provider": "codex",
+        "runtime_id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+        "source_path": "~/.codex/skills/feishu-doc-creator-skill",
+        "type": "runtime_local"
+      }
+    },
+    "created_at": "2026-06-04T06:37:31Z",
+    "created_by": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "飞书文档创建主编排技能 - 将 Markdown 文件转换为飞书文档，编排多个子技能协作完成，支持25种飞书文档块类型。",
+    "id": "b4efc94f-2d5b-4682-9ac6-116be3dbf610",
+    "name": "feishu-doc-orchestrator",
+    "updated_at": "2026-06-04T06:37:31Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "config": {
+      "origin": {
+        "provider": "codex",
+        "runtime_id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+        "source_path": "~/.codex/skills/feishu-doc-readability",
+        "type": "runtime_local"
+      }
+    },
+    "created_at": "2026-06-04T06:37:30Z",
+    "created_by": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "Use when optimizing Feishu/Lark cloud documents for readability, selecting poorly readable docs, restructuring document content, or generating Feishu-friendly Markdown, HTML, DOCX, and safe cloud-document copies.",
+    "id": "6d6679c1-2379-4b9e-9a17-4a689ef07585",
+    "name": "feishu-doc-readability",
+    "updated_at": "2026-06-04T06:37:30Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "config": {
+      "origin": {
+        "provider": "codex",
+        "runtime_id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+        "source_path": "~/.codex/skills/lark-doc",
+        "type": "runtime_local"
+      }
+    },
+    "created_at": "2026-06-04T06:37:30Z",
+    "created_by": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "飞书云文档 / Docx / 知识库 Wiki 文档（v2）：创建、打开、读取、获取、查看、总结、整理、改写、翻译、审阅和编辑飞书文档内容。当用户给出飞书文档 URL/token，或说查看/读取/打开某个文档、提取文档内容、总结文档、生成/创建文档、追加/替换/删除/移动内容、调整排版、插入或下载文档图片/附件/素材/画板缩略图时使用。文档内容中出现嵌入电子表格、多维表格、需要将重要信息可视化为画板（含 SVG 画板）、引用或同步块时，也先用本 skill 读取和提取 token，再切到对应 skill 下钻。使用本 skill 时，docs +create、docs +fetch、docs +update 必须携带 --api-version v2；默认使用 DocxXML，也支持 Markdown。当用户给出 doubao.com 的 /docx/ 或 /wiki/ URL/token 时，也应直接使用本 skill，不要因为域名不是飞书而回退到 WebFetch；路由依据是 URL 路径模式和 token，而不是域名。",
+    "id": "fce83564-ba27-4e87-a2c7-72890c91c254",
+    "name": "lark-doc",
+    "updated_at": "2026-06-04T06:37:30Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "config": {
+      "origin": {
+        "provider": "codex",
+        "runtime_id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+        "source_path": "~/.codex/skills/markdown-formatter",
+        "type": "runtime_local"
+      }
+    },
+    "created_at": "2026-06-04T06:37:30Z",
+    "created_by": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "Format and clean up markdown documents following best practices",
+    "id": "287cc2c6-7e56-4d22-96dc-718deb0c74bc",
+    "name": "markdown-formatter",
+    "updated_at": "2026-06-04T06:37:30Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "config": {
+      "origin": {
+        "provider": "codex",
+        "runtime_id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+        "source_path": "~/.codex/skills/markdown-to-html",
+        "type": "runtime_local"
+      }
+    },
+    "created_at": "2026-06-04T06:37:30Z",
+    "created_by": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "Convert Markdown files to HTML similar to `marked.js`, `pandoc`, `gomarkdown/markdown`, or similar tools; or writing custom script to convert markdown to html and/or working on web template systems like `jekyll/jekyll`, `gohugoio/hugo`, or similar web templating systems that utilize markdown documents, converting them to html. Use when asked to \"convert markdown to html\", \"transform md to html\", \"render markdown\", \"generate html from markdown\", or when working with .md files and/or web a templating system that converts markdown to HTML output. Supports CLI and Node.js workflows with GFM, CommonMark, and standard Markdown flavors.",
+    "id": "badd089c-ce92-486f-ba5d-31f24e15a982",
+    "name": "markdown-to-html",
+    "updated_at": "2026-06-04T06:37:30Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "config": {
+      "origin": {
+        "provider": "codex",
+        "runtime_id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+        "source_path": "~/.codex/skills/paigod-imagegen",
+        "type": "runtime_local"
+      }
+    },
+    "created_at": "2026-06-04T06:37:30Z",
+    "created_by": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "Paigod gpt-image-2 text-to-image workflow for high-quality image generation.",
+    "id": "4b77fde2-f59c-489a-99fc-c30644494a6f",
+    "name": "paigod-imagegen",
+    "updated_at": "2026-06-04T06:52:47Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "config": {
+      "origin": {
+        "provider": "codex",
+        "runtime_id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+        "source_path": "~/.codex/skills/pdf",
+        "type": "runtime_local"
+      }
+    },
+    "created_at": "2026-06-04T06:37:30Z",
+    "created_by": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "Use when tasks involve reading, creating, or reviewing PDF files where rendering and layout matter; prefer visual checks by rendering pages (Poppler) and use Python tools such as `reportlab`, `pdfplumber`, and `pypdf` for generation and extraction.",
+    "id": "5e25436f-de07-46c7-997f-3549c3f084a2",
+    "name": "pdf",
+    "updated_at": "2026-06-04T06:37:30Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "config": {
+      "origin": {
+        "provider": "codex",
+        "runtime_id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+        "source_path": "~/.codex/skills/playwright",
+        "type": "runtime_local"
+      }
+    },
+    "created_at": "2026-06-04T06:37:30Z",
+    "created_by": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "Use when the task requires automating a real browser from the terminal (navigation, form filling, snapshots, screenshots, data extraction, UI-flow debugging) via `playwright-cli` or the bundled wrapper script.",
+    "id": "8681cdbb-fa62-45d5-8b26-52d14bd87e5d",
+    "name": "playwright",
+    "updated_at": "2026-06-04T06:37:30Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  },
+  {
+    "config": {
+      "origin": {
+        "provider": "codex",
+        "runtime_id": "75dcdb70-326b-4035-b6f7-1ee149f079d8",
+        "source_path": "~/.codex/skills/playwright-interactive",
+        "type": "runtime_local"
+      }
+    },
+    "created_at": "2026-06-04T06:37:30Z",
+    "created_by": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "Persistent browser and Electron interaction through `js_repl` for fast iterative UI debugging.",
+    "id": "0436ad23-a85e-4589-b096-fc1b051cce22",
+    "name": "playwright-interactive",
+    "updated_at": "2026-06-04T06:37:30Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  }
+]

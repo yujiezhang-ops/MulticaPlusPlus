@@ -1,0 +1,29 @@
+[
+  {
+    "archived_at": null,
+    "archived_by": null,
+    "avatar_url": null,
+    "created_at": "2026-06-02T03:35:45Z",
+    "creator_id": "86e9c9b8-7871-4409-96f0-f1c3ee821e97",
+    "description": "Claude 把总体 + Codex 干局部",
+    "id": "88d4646d-2eb8-496a-909e-c701a765196b",
+    "instructions": "仓库事实:主仓=个人仓 https://github.com/yujiezhang-ops/MulticaPlusPlus，活跃分支=main(已含 spec/overlay/capability/ledger 四模块 + multica-client)。所有 PR base 指向 main；integration/m1-spa2-spa4 已合并废弃，勿提回；novitalabs 仓已停用。",
+    "leader_id": "84bf5c5c-cb95-4322-b5c7-c5dc6e10f47b",
+    "member_count": 2,
+    "member_preview": [
+      {
+        "member_id": "84bf5c5c-cb95-4322-b5c7-c5dc6e10f47b",
+        "member_type": "agent",
+        "role": "leader"
+      },
+      {
+        "member_id": "1c452629-b2a0-4924-9ae4-1703d48705cf",
+        "member_type": "agent",
+        "role": "member"
+      }
+    ],
+    "name": "MulticaPlusPlus",
+    "updated_at": "2026-06-03T09:00:29Z",
+    "workspace_id": "0d138b0b-c189-4480-b96e-e260b695c0a8"
+  }
+]

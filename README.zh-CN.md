@@ -6,6 +6,11 @@ Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica
 可审计的控制记录。
 
 完整产品说明见 [中文 PRD](docs/prd/MulticaPlusPlus-PRD.zh-CN.md)。
+后续开发必须遵守 [开发约束](docs/development-constraints.zh-CN.md)，提交前按
+[PR 检查清单](docs/pr-checklist.zh-CN.md) 自查。
+本机 Codex 已提供精简 skill：
+`C:\Users\PPIO\.codex\skills\multica-plusplus-dev-guardrails\SKILL.md`，后续开发
+可先触发该 skill，再按仓库文档处理细节。
 
 当前 GUI 方向见 [GUI 计划](gui/README.md)，简化版概念图提示词位于
 `gui/assets/multica-console-simplified.prompt.md`。本地生成的参考图保存在
@@ -22,6 +27,9 @@ Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica
   key、MCP server、权限 scope 和风险。
 - 记录 Goal/Plan Ledger Lite：支持 draft、locked、running、completed 等状态。
 - 通过 Multica CLI 只读读取 issue、agent、runtime、skills 数据生成 spec。
+- 支持 LLM 辅助 `locked Goal -> 多 Plan` 拆分：优先通过本机 Codex / Claude
+  Agent CLI 桥生成并行 `planSet` 草案；无可用 provider 时返回 blocked，不自动
+  降级为规则拆分。
 
 ## GUI-first 方向
 
@@ -36,11 +44,13 @@ Multica++ 是 Multica 的 GUI-first 外接插件控制台。它不重做 Multica
 - `Plan`：计划步骤、状态、依赖、当前执行项和阻塞项。
 - `Agent Permission Setup`：权限模板、scope、TTL、审批、风险摘要、预览和应用。
 
-当前 GUI 左侧是 Multica++ 插件导航：`Control`、`Permissions`、`Activity`、
-`Records`、`Settings`。其中 `Control` 是承载三栏控制台的默认视图。左侧
+当前 GUI 左侧是 Multica++ 插件导航：`控制台`、`权限`、`活动`、`记录`、
+`设置`。其中 `控制台` 是承载三栏控制台的默认视图。左侧
 workspace 卡片下方新增 `一键配置 Agent` 按钮，用于打开本地配置弹层。
+界面文案当前以中文为默认语言，`设置` 中已预留 `English` 切换入口，后续接入
+完整英文文案包后再启用切换。
 
-左侧还会显示 `Plugin Presets` 和 `Team Presets`。`Project`、`Issues`、
+左侧还会显示 `插件预制体` 和 `团队预制体`。`Project`、`Issues`、
 `Agents`、`Runs`、`Environments`、`Data`、`Skills`、`MCP` 和 runtime settings
 继续留在 Multica 原生侧；Multica++ 不接管这些完整管理页面。真实产品能力仍
 收敛在三栏：`Goal`、`Plan` 和 `Agent Permission Setup`。
@@ -80,8 +90,8 @@ npm run gui
 - 绑定 `paigod-imagegen` skill 到该 agent。
 - 把审计记录追加到 `out/agent-config-events.jsonl`。
 
-也可以直接在左侧 `Plugin Presets` / `Team Presets` 中选择预制体，修改默认配置
-后点击 `Preview Plan` 或 `Create Agent`。弹层内的 `Create Team Preset` 可以基于
+也可以直接在左侧 `插件预制体` / `团队预制体` 中选择预制体，修改默认配置
+后点击 `预览计划` 或 `创建 Agent`。弹层内的 `创建团队预制体` 可以基于
 团队共同本地环境创建一个当前 GUI server 会话内的团队预制体；它不写 Multica
 metadata，也不持久化到仓库文件。当前真实创建范围是 Multica Agent；Squad 预制体
 先作为后续扩展。
@@ -144,6 +154,87 @@ node src/cli.js agent-config apply \
 skill 分配；不会伪造成功。`custom_env` 写入被设计为阻断项，必须在人工确认后
 用 `multica agent env set --custom-env-file` 或 `--custom-env-stdin` 单独处理。
 
+Goal / Plan 到 issue 的受控流程：
+
+```bash
+# 将模糊需求整理成 Goal 草案
+node src/cli.js goal normalize \
+  --input examples/goal-request.json \
+  --goal-out out/goal.json \
+  --output json
+
+# 人工确认后锁定 Goal
+node src/cli.js goal lock \
+  --input out/goal.json \
+  --goal-out out/locked-goal.json \
+  --approved-by ppio \
+  --output json
+
+# 从 locked Goal 生成 Plan
+node src/cli.js plan generate \
+  --input out/locked-goal.json \
+  --complexity complex \
+  --plan-out out/plan.json \
+  --output json
+
+# 探测本机 LLM Agent CLI provider，不读取或输出密钥
+node src/cli.js llm discover --output json
+
+# LLM 辅助拆分为多个并行 Plan；无 Codex/Claude CLI 时返回 blocked 且非零退出
+node src/cli.js plan split \
+  --input out/locked-goal.json \
+  --llm \
+  --plan-set-out out/plan-set.json \
+  --output json
+
+# 显式规则 fallback：不带 --llm，不调用外部模型
+node src/cli.js plan split \
+  --input out/locked-goal.json \
+  --plan-set-out out/plan-set.json \
+  --output json
+
+# 预览是否拆成 Multica issue，不写 Multica
+node src/cli.js plan preview-issues \
+  --goal out/locked-goal.json \
+  --plan out/plan.json \
+  --issue-split-out out/issue-split.json \
+  --output json
+
+# 对 planSet 预览 issue：每个子 Plan 生成一个 issue candidate，不写 Multica
+node src/cli.js plan preview-issues \
+  --goal out/locked-goal.json \
+  --plan-set out/plan-set.json \
+  --issue-split-out out/issue-split.json \
+  --output json
+
+# dry-run apply：默认不写 Multica
+node src/cli.js plan apply-issues \
+  --issue-split out/issue-split.json \
+  --audit-path out/issue-split-events.jsonl \
+  --output json
+
+# 真实创建 issue：必须显式确认
+node src/cli.js plan apply-issues \
+  --issue-split out/issue-split.json \
+  --audit-path out/issue-split-events.jsonl \
+  --execute \
+  --confirm APPLY-MULTICA-ISSUE-SPLIT \
+  --output json
+```
+
+LLM 辅助拆分只通过本机 Agent CLI 桥调用模型。provider 发现只检测用户显式配置、
+`%USERPROFILE%\.codex`、`%USERPROFILE%\.claude`、命令可用性以及 CC Switch /
+Cherry Studio 等配置工具的存在性提示；不会读取 `auth.json`、settings secret 或
+API key。模型输出必须是裸 JSON，本地代码会补齐 id、number、status、timestamps
+并二次校验。少于两个 Plan、步骤不足、包含真实写入或绕过确认的指令都会被 blocked。
+Codex provider 通过 `codex exec --json --sandbox read-only --ephemeral --output-schema <schema-file> --output-last-message <file>`
+读取最终消息；Claude provider 通过
+`claude -p --output-format json --no-session-persistence --tools "" --json-schema <schema-json>`
+读取单次结果。
+
+`plan apply-issues` 真实执行会使用 `multica issue create --description-file` 创建
+issue，并逐键写入 metadata。默认 dry-run 不会调用 Multica。
+
 锁定并列出 ledger：
 
 ```bash
@@ -166,6 +257,8 @@ node src/cli.js list --ledger out/ledger.jsonl --output json
 - `src/agent-config.js`：一键配置 Agent 的 Multica CLI 探测、计划和受控执行。
 - `src/agent-preset.js`：插件预制体、团队预制体、用户覆盖合并和预制体到 Agent
   配置计划的转换。
+- `src/llm-assist.js`：LLM provider 发现、Agent CLI 桥调用、模型 JSON 解析和
+  Goal/Plan 拆分草案校验。
 - `src/gui-server.js`：本地 GUI server 和按钮触发的真实 Image2 Agent 创建 API。
 - `examples/`：issue assignment、comment mention、autopilot run 示例输入。
 - `ops/monitoring/`：本地监控记录、更新日志、快照和备份目录。
@@ -178,6 +271,15 @@ node src/cli.js list --ledger out/ledger.jsonl --output json
 - Codex Full Access Worker 负责局部实现、测试、CLI 联调和验证。
 - Codex 不得擅自修改 schema、权限边界或协作规则。
 - 涉及 secret 的内容只记录 key 名和风险，不记录明文值。
+
+## 开发约束
+
+- 任何后续开发必须先阅读 [开发约束](docs/development-constraints.zh-CN.md)。
+- 日常执行可先使用本机 skill
+  `C:\Users\PPIO\.codex\skills\multica-plusplus-dev-guardrails\SKILL.md`。
+- PR 前必须按 [PR 检查清单](docs/pr-checklist.zh-CN.md) 自查。
+- 用户可见变更必须写入 [CHANGELOG.md](CHANGELOG.md) 的 `Unreleased`。
+- 贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 路线图
 

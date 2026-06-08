@@ -1,0 +1,4 @@
+Daemon:      running (pid 32016, uptime 12h54m54s)
+Version:     0.3.16
+Agents:      openclaw, hermes, claude, codex
+Workspaces:  2

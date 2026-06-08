@@ -46,7 +46,7 @@ test("GUI button posts to the local Image2 agent creation endpoint", async () =>
   assert.ok(image2Call, "Image2 create endpoint should be called");
   assert.equal(image2Call.options.method, "POST");
   assert.equal(JSON.parse(image2Call.options.body).confirm, "CREATE-MULTICA-IMAGE2-CODEX-AGENT");
-  assert.ok(document.textContent().includes("Created in Multica"));
+  assert.ok(document.textContent().includes("已在 Multica 创建"));
   assert.ok(document.textContent().includes("agent-created"));
   assert.ok(clickLog.includes("data-action:create-image2-agent"));
 });
@@ -152,8 +152,8 @@ test("GUI renders plugin and team presets, previews an edited preset, and create
   new Script(appSource).runInContext(context);
   await waitFor(() => document.querySelector("[data-agent-preset-id='team-gui-builder']"));
 
-  assert.ok(document.textContent().includes("Plugin Presets"));
-  assert.ok(document.textContent().includes("Team Presets"));
+  assert.ok(document.textContent().includes("插件预制体"));
+  assert.ok(document.textContent().includes("团队预制体"));
   assert.ok(document.textContent().includes("Team GUI Builder Agent"));
 
   const teamPreset = document.querySelector("[data-agent-preset-id='team-gui-builder']");
@@ -176,6 +176,495 @@ test("GUI renders plugin and team presets, previews an edited preset, and create
   assert.equal(JSON.parse(createCall.options.body).confirm, "CREATE-MULTICA-AGENT-FROM-PRESET");
   assert.ok(document.textContent().includes("agent-from-preset"));
   assert.ok(clickLog.includes("data-action:create-selected-preset-agent"));
+});
+
+test("GUI settings renders Chinese-first language setting with English reserved", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document } = createTinyDocument();
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url) => {
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.textContent().includes("界面语言"));
+
+  const pageText = document.textContent();
+  assert.ok(pageText.includes("界面语言"));
+  assert.ok(pageText.includes("中文"));
+  assert.ok(pageText.includes("English"));
+  assert.ok(pageText.includes("预留"));
+});
+
+test("GUI settings renders Multica Agent assisted configuration without secret fields", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document } = createTinyDocument();
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url) => {
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.textContent().includes("Multica Agent 辅助"));
+
+  const pageText = document.textContent();
+  assert.ok(pageText.includes("Multica Agent 辅助"));
+  assert.ok(pageText.includes("自动选择"));
+  assert.ok(pageText.includes("Agent"));
+  assert.ok(pageText.includes("超时"));
+  assert.ok(pageText.includes("检测 Agent"));
+  assert.ok(pageText.includes("高级：本地 CLI 直连 provider"));
+  assert.ok(pageText.includes("读取密钥摘要"));
+  assert.ok(pageText.includes("READ-LOCAL-LLM-SECRET-METADATA"));
+  assert.equal(pageText.includes("API Key"), false);
+});
+
+test("GUI settings keeps Agent test and secret metadata as separate actions", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document } = createTinyDocument();
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url) => {
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.querySelector("[data-action='diagnose-llm']"));
+
+  assert.ok(document.querySelector("[data-action='diagnose-llm']"), "provider test action should render");
+  assert.ok(document.querySelector("[data-action='read-llm-secret-metadata']"), "secret metadata action should render");
+  const pageText = document.textContent();
+  assert.ok(pageText.includes("检测 Agent"));
+  assert.ok(pageText.includes("读取密钥摘要"));
+});
+
+test("GUI reads LLM secret metadata with confirmation token and provider config", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document, clickLog } = createTinyDocument();
+  const fetchCalls = [];
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/llm/secret-metadata") {
+        return responseJson({
+          ok: true,
+          metadata: {
+            provider: "codex",
+            pathHint: "%USERPROFILE%\\.codex\\auth.json",
+            keyName: "OPENAI_API_KEY",
+            present: true,
+            fingerprint: "sha256:abcd",
+            lengthRange: "sk-...48",
+            formatHint: "bearer token",
+            rawSecret: "must-not-render",
+          },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.querySelector("[data-action='read-llm-secret-metadata']"));
+
+  document.querySelector("#llm-custom-command").value = "codex";
+  document.querySelector("#llm-custom-model").value = "gpt-5-codex";
+  document.querySelector("#llm-secret-confirm").value = "READ-LOCAL-LLM-SECRET-METADATA";
+  const readButton = document.querySelector("[data-action='read-llm-secret-metadata']");
+  readButton.dispatchEvent({ type: "click", target: readButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const metadataCall = fetchCalls.find((call) => call.url === "/api/llm/secret-metadata");
+  assert.ok(metadataCall, "secret metadata endpoint should be called");
+  const body = JSON.parse(metadataCall.options.body);
+  assert.equal(body.confirm, "READ-LOCAL-LLM-SECRET-METADATA");
+  assert.equal(body.llm.provider, "codex");
+  assert.equal(body.llm.model, "gpt-5-codex");
+  const pageText = document.textContent();
+  assert.ok(pageText.includes("sha256:abcd"));
+  assert.ok(pageText.includes("OPENAI_API_KEY"));
+  assert.equal(pageText.includes("must-not-render"), false);
+  assert.ok(clickLog.includes("data-action:read-llm-secret-metadata"));
+});
+
+test("GUI clarifies a goal, locks it, and previews issue split from the control panel", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document, clickLog } = createTinyDocument();
+  const fetchCalls = [];
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") {
+        return responseJson({ ok: true, presets: [] });
+      }
+      if (url === "/api/goal/normalize") {
+        return responseJson({
+          ok: true,
+          goal: {
+            id: "goal-1",
+            status: "clarified",
+            title: "实现 Goal/Plan 拆分能力",
+            objective: "把模糊需求整理成 locked Goal 和 Plan。",
+            owner: "Codex",
+            source: "gui",
+            successCriteria: ["Goal can be locked", "Plan can preview issue split"],
+            clarificationQuestions: [],
+          },
+        });
+      }
+      if (url === "/api/goal/lock") {
+        return responseJson({
+          ok: true,
+          goal: {
+            id: "goal-1",
+            status: "locked",
+            title: "实现 Goal/Plan 拆分能力",
+            objective: "把模糊需求整理成 locked Goal 和 Plan。",
+            owner: "Codex",
+            source: "gui",
+            successCriteria: ["Goal can be locked", "Plan can preview issue split"],
+            clarificationQuestions: [],
+          },
+        });
+      }
+      if (url === "/api/plan/generate") {
+        return responseJson({
+          ok: true,
+          plan: {
+            id: "plan-1",
+            goalId: "goal-1",
+            status: "draft",
+            complexity: "complex",
+            issueSplitRecommendation: "multiple",
+            steps: [
+              { number: 1, title: "锁定 Goal", status: "pending", dependencies: [] },
+              { number: 2, title: "拆分 Plan", status: "pending", dependencies: [1] },
+            ],
+          },
+        });
+      }
+      if (url === "/api/plan/preview-issues") {
+        return responseJson({
+          ok: true,
+          issueSplit: {
+            mode: "multiple",
+            confirmationRequired: true,
+            summary: "确认后创建 2 个 Multica issue。",
+            issues: [
+              { title: "实现 Goal", priority: "medium" },
+              { title: "实现 Plan", priority: "medium" },
+            ],
+          },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.querySelector("[data-action='clarify-goal']"));
+
+  const input = document.querySelector("#goal-request-input");
+  input.value = "实现 Goal Plan 模块，复杂任务可以拆成多个 Multica issue";
+
+  const clarifyButton = document.querySelector("[data-action='clarify-goal']");
+  clarifyButton.dispatchEvent({ type: "click", target: clarifyButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const lockButton = document.querySelector("[data-action='lock-goal']");
+  lockButton.dispatchEvent({ type: "click", target: lockButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const previewButton = document.querySelector("[data-action='preview-issue-split']");
+  previewButton.dispatchEvent({ type: "click", target: previewButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(fetchCalls.map((call) => call.url).filter((url) => url.startsWith("/api/goal") || url.startsWith("/api/plan")), [
+    "/api/goal/normalize",
+    "/api/goal/lock",
+    "/api/plan/generate",
+    "/api/plan/preview-issues",
+  ]);
+  const normalizeBody = JSON.parse(fetchCalls.find((call) => call.url === "/api/goal/normalize").options.body);
+  assert.equal(normalizeBody.mode, "agent");
+  assert.equal(normalizeBody.language, "zh-CN");
+  assert.equal(normalizeBody.context.language, "zh-CN");
+  assert.equal(normalizeBody.assist.timeoutMs, 300000);
+  assert.equal(JSON.parse(fetchCalls.find((call) => call.url === "/api/plan/generate").options.body).language, "zh-CN");
+  assert.equal(JSON.parse(fetchCalls.find((call) => call.url === "/api/plan/preview-issues").options.body).language, "zh-CN");
+  assert.ok(document.textContent().includes("Goal 已锁定"));
+  assert.ok(document.textContent().includes("Plan 已生成"));
+  assert.ok(document.textContent().includes("Issue 已预览"));
+  assert.ok(document.textContent().includes("Plan 到 Issue 预览"));
+  assert.ok(document.textContent().includes("生成 Plan 并预览 Issue"));
+  assert.ok(document.textContent().includes("确认后创建 2 个 Multica issue"));
+  assert.equal(document.textContent().includes("Create 2 Multica issues"), false);
+  assert.ok(clickLog.includes("data-action:clarify-goal"));
+  assert.ok(clickLog.includes("data-action:lock-goal"));
+  assert.ok(clickLog.includes("data-action:preview-issue-split"));
+});
+
+test("GUI separates Goal/Plan control and permissions into distinct pages", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const htmlSource = await readFile(new URL("../gui/index.html", import.meta.url), "utf8");
+  const { document } = createTinyDocument();
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url) => {
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.querySelector("[data-action='open-permissions']"));
+
+  assert.ok(htmlSource.includes('id="permissions-view"'));
+  assert.ok(htmlSource.includes('data-view="permissions"'));
+  assert.ok(htmlSource.indexOf('id="permission-panel"') > htmlSource.indexOf('id="permissions-view"'));
+  assert.ok(htmlSource.indexOf('id="permission-panel"') > htmlSource.indexOf('</section>\n\n          <section id="permissions-view"'));
+
+  const topbarButton = document.querySelector("[data-action='open-permissions']");
+  topbarButton.dispatchEvent({ type: "click", target: topbarButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const permissionsNav = document.querySelector("[data-nav-target='permissions']");
+  const controlNav = document.querySelector("[data-nav-target='control']");
+  assert.equal(permissionsNav.getAttribute("aria-current"), "page");
+  assert.equal(controlNav.getAttribute("aria-current"), "false");
+});
+
+test("GUI blocks Agent-assisted plan split when no agent is available", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document, clickLog } = createTinyDocument();
+  const fetchCalls = [];
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/goal/normalize") {
+        return responseJson({
+          ok: true,
+          goal: {
+            id: "goal-1",
+            status: "clarified",
+            title: "实现 Goal/Plan 拆分能力",
+            objective: "把模糊需求整理成 locked Goal 和多个 Plan。",
+            owner: "Codex",
+            source: "gui",
+            successCriteria: ["PlanSet can be generated"],
+            clarificationQuestions: [],
+          },
+        });
+      }
+      if (url === "/api/goal/lock") {
+        return responseJson({
+          ok: true,
+          goal: {
+            id: "goal-1",
+            status: "locked",
+            title: "实现 Goal/Plan 拆分能力",
+            objective: "把模糊需求整理成 locked Goal 和多个 Plan。",
+            owner: "Codex",
+            source: "gui",
+            successCriteria: ["PlanSet can be generated"],
+            clarificationQuestions: [],
+          },
+        });
+      }
+      if (url === "/api/assist/agents") {
+        return responseJson({ ok: true, status: "blocked", reason: "no_assist_agent", agents: [] });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.querySelector("[data-action='clarify-goal']"));
+
+  document.querySelector("[data-action='clarify-goal']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='clarify-goal']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  document.querySelector("[data-action='lock-goal']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='lock-goal']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const splitButton = document.querySelector("[data-action='split-plan-llm']");
+  splitButton.dispatchEvent({ type: "click", target: splitButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(fetchCalls.some((call) => call.url === "/api/assist/agents"));
+  assert.equal(fetchCalls.some((call) => call.url === "/api/plan/split"), false);
+  assert.ok(document.textContent().includes("未发现可用 Multica Agent"));
+  assert.ok(clickLog.includes("data-action:split-plan-llm"));
+});
+
+test("GUI renders multiple Agent-assisted parallel Plan cards", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document } = createTinyDocument();
+  const fetchCalls = [];
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/goal/normalize") {
+        return responseJson({
+          ok: true,
+          goal: {
+            id: "goal-1",
+            status: "clarified",
+            title: "实现 Goal/Plan 拆分能力",
+            objective: "把模糊需求整理成 locked Goal 和多个 Plan。",
+            owner: "Codex",
+            source: "gui",
+            successCriteria: ["PlanSet can be generated"],
+            clarificationQuestions: [],
+          },
+        });
+      }
+      if (url === "/api/goal/lock") {
+        return responseJson({
+          ok: true,
+          goal: {
+            id: "goal-1",
+            status: "locked",
+            title: "实现 Goal/Plan 拆分能力",
+            objective: "把模糊需求整理成 locked Goal 和多个 Plan。",
+            owner: "Codex",
+            source: "gui",
+            successCriteria: ["PlanSet can be generated"],
+            clarificationQuestions: [],
+          },
+        });
+      }
+      if (url === "/api/assist/agents") {
+        return responseJson({
+          ok: true,
+          status: "available",
+          selectedAgent: { id: "agent-lead", name: "Claude-Lead", model: "pa/claude-opus", status: "idle", runtimeStatus: "online" },
+          agents: [{ id: "agent-lead", name: "Claude-Lead", model: "pa/claude-opus", status: "idle", runtimeStatus: "online" }],
+        });
+      }
+      if (url === "/api/plan/split") {
+        const body = JSON.parse(options.body);
+        assert.equal(body.mode, "agent");
+        assert.equal(body.language, "zh-CN");
+        return responseJson({
+          ok: true,
+          planSet: {
+            id: "plan_set_1",
+            status: "draft",
+            splitMode: "parallel",
+            strategy: "llm-assisted-workstreams",
+            provider: { id: "provider-multica-agent", kind: "multica-agent", command: "multica", model: "pa/claude-opus", source: "multica-agent" },
+            assist: {
+              agent: { id: "agent-lead", name: "Claude-Lead" },
+              issue: { id: "issue-plan", identifier: "SPA-100", status: "todo" },
+              run: { id: "run-plan", status: "completed" },
+            },
+            plans: [
+              {
+                id: "subplan-1",
+                number: 1,
+                title: "Provider discovery",
+                objective: "Detect local providers.",
+                workstream: { id: "provider", label: "Provider", reason: "Independent." },
+                suggestedAgent: "planner-agent",
+                dependencies: [],
+                steps: [
+                  { number: 1, title: "Detect CLI", status: "pending", dependencies: [] },
+                  { number: 2, title: "Block missing provider", status: "pending", dependencies: [1] },
+                ],
+                acceptanceEvidence: "Provider discovery output.",
+              },
+              {
+                id: "subplan-2",
+                number: 2,
+                title: "Plan rendering",
+                objective: "Render plan cards.",
+                workstream: { id: "rendering", label: "Rendering", reason: "Independent." },
+                suggestedAgent: "gui-agent",
+                dependencies: [],
+                steps: [
+                  { number: 1, title: "Render cards", status: "pending", dependencies: [] },
+                  { number: 2, title: "Show steps", status: "pending", dependencies: [1] },
+                ],
+                acceptanceEvidence: "Cards visible.",
+              },
+            ],
+            warnings: [],
+          },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.querySelector("[data-action='clarify-goal']"));
+
+  document.querySelector("[data-action='clarify-goal']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='clarify-goal']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  document.querySelector("[data-action='lock-goal']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='lock-goal']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  document.querySelector("[data-action='split-plan-llm']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='split-plan-llm']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(fetchCalls.some((call) => call.url === "/api/plan/split"));
+  assert.ok(document.textContent().includes("Provider discovery"));
+  assert.ok(document.textContent().includes("Plan rendering"));
+  assert.ok(document.textContent().includes("并行 Plan"));
+  assert.ok(document.textContent().includes("Claude-Lead"));
+  assert.ok(document.textContent().includes("SPA-100"));
 });
 
 test("GUI creates a team preset and refreshes the preset list", async () => {
@@ -271,7 +760,7 @@ test("GUI creates a team preset and refreshes the preset list", async () => {
   assert.equal(requestBody.name, "Team Image Review Agent");
   assert.equal(requestBody.createdBy, "DesignOps");
   assert.ok(document.textContent().includes("Team Image Review Agent"));
-  assert.ok(document.textContent().includes("Team preset created"));
+  assert.ok(document.textContent().includes("团队预制体已创建"));
   assert.ok(clickLog.includes("data-action:create-team-preset"));
 });
 
@@ -309,14 +798,23 @@ function createTinyDocument() {
         const id = selector.slice("[data-agent-preset-id='".length, -2);
         return findNodeByAttribute(document.body, "data-agent-preset-id", id);
       }
+      if (selector.startsWith("[data-nav-target='")) {
+        const target = selector.slice("[data-nav-target='".length, -2);
+        return nodes.get(selector) ?? findNodeByAttribute(document.body, "data-nav-target", target);
+      }
       if (selector.startsWith("[data-action='")) {
         const action = selector.slice("[data-action='".length, -2);
         return nodes.get(selector) ?? findNodeByAttribute(document.body, "data-action", action);
       }
+      if (selector.startsWith("#")) {
+        return nodes.get(selector) ?? findNodeById(document.body, selector.slice(1));
+      }
       return nodes.get(selector) ?? null;
     },
     querySelectorAll(selector) {
-      if (selector === "[data-nav-target]") return [];
+      if (selector === "[data-nav-target]") {
+        return Array.from(nodes.values()).filter((node) => node?.getAttribute?.("data-nav-target"));
+      }
       if (selector === "[data-view]") return [];
       if (selector === ".cli-command-row code") return [];
       return [];
@@ -360,23 +858,34 @@ function createTinyDocument() {
     "#new-preset-description",
     "#new-preset-instructions",
     "#new-preset-feedback",
+    "#llm-custom-command",
+    "#llm-custom-model",
+    "#llm-timeout-ms",
+    "#llm-secret-confirm",
   ];
   selectors.forEach((selector) => {
     const node = element(selector.replace(/^[#.]/, "div"));
     nodes.set(selector, node);
     document.body.appendChild(node);
   });
-  nodes.get("#plugin-preset-list").textContent = "Plugin Presets";
-  nodes.get("#team-preset-list").textContent = "Team Presets";
+  nodes.get("#plugin-preset-list").textContent = "插件预制体";
+  nodes.get("#team-preset-list").textContent = "团队预制体";
   nodes.set("[data-action='open-agent-config']", actionButton("open-agent-config"));
+  nodes.set("[data-action='open-permissions']", actionButton("open-permissions"));
   nodes.set("[data-action='preview-selected-preset']", actionButton("preview-selected-preset"));
   nodes.set("[data-action='create-selected-preset-agent']", actionButton("create-selected-preset-agent"));
   nodes.set("[data-action='create-team-preset']", actionButton("create-team-preset"));
+  nodes.set("[data-action='split-plan-llm']", null);
   nodes.set("[data-action='create-image2-agent']", null);
+  nodes.set("[data-nav-target='control']", navButton("control"));
+  nodes.set("[data-nav-target='permissions']", navButton("permissions"));
   document.body.appendChild(nodes.get("[data-action='open-agent-config']"));
+  document.body.appendChild(nodes.get("[data-action='open-permissions']"));
   document.body.appendChild(nodes.get("[data-action='preview-selected-preset']"));
   document.body.appendChild(nodes.get("[data-action='create-selected-preset-agent']"));
   document.body.appendChild(nodes.get("[data-action='create-team-preset']"));
+  document.body.appendChild(nodes.get("[data-nav-target='control']"));
+  document.body.appendChild(nodes.get("[data-nav-target='permissions']"));
 
   function actionButton(action) {
     const node = element("button");
@@ -385,6 +894,12 @@ function createTinyDocument() {
       clickLog.push(`data-action:${action}`);
       clickHandlers.forEach((handler) => handler({ ...event, target: node }));
     };
+    return node;
+  }
+
+  function navButton(target) {
+    const node = element("button");
+    node.setAttribute("data-nav-target", target);
     return node;
   }
 
@@ -405,12 +920,27 @@ function createTinyDocument() {
       appendChild(child) {
         this.children.push(child);
         this.firstChild = this.children[0] ?? null;
+        const action = child?.getAttribute?.("data-action");
+        if (action) {
+          nodes.set(`[data-action='${action}']`, child);
+        }
+        const id = child?.id || child?.getAttribute?.("id");
+        if (id) {
+          nodes.set(`#${id}`, child);
+        }
         if (child?.getAttribute?.("data-action") === "create-image2-agent") {
           nodes.set("[data-action='create-image2-agent']", child);
+        }
+        if (child?.getAttribute?.("data-action") === "split-plan-llm") {
+          nodes.set("[data-action='split-plan-llm']", child);
         }
         const presetId = child?.getAttribute?.("data-agent-preset-id");
         if (presetId) {
           nodes.set(`[data-agent-preset-id='${presetId}']`, child);
+        }
+        const navTarget = child?.getAttribute?.("data-nav-target");
+        if (navTarget) {
+          nodes.set(`[data-nav-target='${navTarget}']`, child);
         }
         return child;
       },
@@ -420,6 +950,7 @@ function createTinyDocument() {
       },
       setAttribute(name, value) {
         attributes.set(name, String(value));
+        if (name === "id") this.id = String(value);
       },
       getAttribute(name) {
         return attributes.get(name) ?? null;
@@ -458,6 +989,16 @@ function findNodeByAttribute(root, name, value) {
   if (root.getAttribute?.(name) === value) return root;
   for (const child of root.children ?? []) {
     const match = findNodeByAttribute(child, name, value);
+    if (match) return match;
+  }
+  return null;
+}
+
+function findNodeById(root, id) {
+  if (!root) return null;
+  if (root.id === id || root.getAttribute?.("id") === id) return root;
+  for (const child of root.children ?? []) {
+    const match = findNodeById(child, id);
     if (match) return match;
   }
   return null;

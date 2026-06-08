@@ -1,6 +1,8 @@
 # Multica Launch Review
 
 中文版说明: [README.zh-CN.md](README.zh-CN.md)
+Development constraints: [docs/development-constraints.zh-CN.md](docs/development-constraints.zh-CN.md)
+PR checklist: [docs/pr-checklist.zh-CN.md](docs/pr-checklist.zh-CN.md)
 
 External pre-run initialization layer for Multica agent tasks.
 
@@ -128,3 +130,6 @@ spec near Multica's task claim flow, but that becomes an upstream PR or fork.
 ```bash
 npm test
 ```
+
+Before opening a PR, read `CONTRIBUTING.md`, update `CHANGELOG.md` for
+user-visible changes, and verify the Chinese PR checklist.

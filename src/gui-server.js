@@ -14,6 +14,22 @@ import {
   listAgentPresets,
   mergePresetOverrides,
 } from "./agent-preset.js";
+import {
+  generatePlanFromGoal,
+  lockGoalDraft,
+  normalizeGoal,
+  normalizeGoalWithAgent,
+  normalizeGoalWithLlm,
+  previewIssueSplit,
+  splitGoalIntoPlansWithAgent,
+  splitGoalIntoPlansWithLlm,
+} from "./goal-plan.js";
+import { diagnoseLlmProvider, discoverLlmProviders, readLlmSecretMetadata } from "./llm-assist.js";
+import {
+  diagnoseAssistAgents,
+  discoverAssistAgents,
+  selectAssistAgent,
+} from "./multica-agent-assist.js";
 
 const DEFAULT_AUDIT_PATH = "out/agent-config-events.jsonl";
 const IMAGE2_CONFIRMATION_TOKEN = "CREATE-MULTICA-IMAGE2-CODEX-AGENT";
@@ -30,6 +46,13 @@ export async function createGuiServer({
   discoveryTimeoutMs = DEFAULT_DISCOVERY_TIMEOUT_MS,
   discoveryRetries = DEFAULT_DISCOVERY_RETRIES,
   exec,
+  llmProviderConfig = {},
+  llmEnv = process.env,
+  llmHomeDir,
+  llmCommandExists,
+  llmPathExists,
+  llmExec,
+  assistExec,
 } = {}) {
   const root = resolve(guiDir);
   const sessionTeamPresets = [];
@@ -44,6 +67,107 @@ export async function createGuiServer({
           discoveryTimeoutMs,
           discoveryRetries,
           exec,
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/goal/normalize") {
+        await handleGoalNormalize({
+          request,
+          response,
+          auditPath,
+          cliPath,
+          assistExec: assistExec ?? exec,
+          llmProviderConfig,
+          llmEnv,
+          llmHomeDir,
+          llmCommandExists,
+          llmPathExists,
+          llmExec,
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/goal/lock") {
+        await handleGoalLock({ request, response, auditPath });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/plan/generate") {
+        await handlePlanGenerate({ request, response, auditPath });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/plan/preview-issues") {
+        await handleIssueSplitPreview({ request, response, auditPath });
+        return;
+      }
+      if (request.method === "GET" && requestPathname(request) === "/api/llm/providers") {
+        await handleLlmProviders({
+          request,
+          response,
+          auditPath,
+          llmProviderConfig,
+          llmEnv,
+          llmHomeDir,
+          llmCommandExists,
+          llmPathExists,
+        });
+        return;
+      }
+      if (request.method === "GET" && requestPathname(request) === "/api/assist/agents") {
+        await handleAssistAgents({
+          response,
+          auditPath,
+          cliPath,
+          assistExec: assistExec ?? exec,
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/assist/diagnose") {
+        await handleAssistDiagnose({
+          response,
+          auditPath,
+          cliPath,
+          assistExec: assistExec ?? exec,
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/llm/diagnose") {
+        await handleLlmDiagnose({
+          request,
+          response,
+          auditPath,
+          llmProviderConfig,
+          llmEnv,
+          llmHomeDir,
+          llmCommandExists,
+          llmPathExists,
+          llmExec,
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/llm/secret-metadata") {
+        await handleLlmSecretMetadata({
+          request,
+          response,
+          auditPath,
+          llmProviderConfig,
+          llmEnv,
+          llmHomeDir,
+          llmPathExists,
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/plan/split") {
+        await handlePlanSplit({
+          request,
+          response,
+          auditPath,
+          cliPath,
+          assistExec: assistExec ?? exec,
+          llmProviderConfig,
+          llmEnv,
+          llmHomeDir,
+          llmCommandExists,
+          llmPathExists,
+          llmExec,
         });
         return;
       }
@@ -148,6 +272,629 @@ async function handleImage2Create({
   });
 }
 
+async function handleGoalNormalize({
+  request,
+  response,
+  auditPath,
+  cliPath,
+  assistExec,
+  llmProviderConfig,
+  llmEnv,
+  llmHomeDir,
+  llmCommandExists,
+  llmPathExists,
+  llmExec,
+}) {
+  const body = await readJsonBody(request);
+  const language = normalizeRequestLanguage(body);
+  if (body.mode === "agent") {
+    const discovery = await discoverAssistAgents({ cliPath, exec: assistExec });
+    const selection = selectAssistAgent({
+      agents: discovery.agents ?? [],
+      preferredAgentId: body.assist?.agentId,
+      mode: body.assist?.selectionMode || (body.assist?.agentId ? "manual" : "auto"),
+    });
+    if (!discovery.ok || !selection.ok) {
+      const reason = discovery.ok ? (selection.reason || "no_assist_agent") : (discovery.reason || "multica_cli_failed");
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "goal_normalization_blocked",
+        mode: "agent",
+        status: "blocked",
+        blocked_reason: reason,
+        agent_count: discovery.agents?.length ?? 0,
+        language,
+      });
+      sendJson(response, 200, {
+        ok: false,
+        blocked: true,
+        reason,
+        agents: discovery.agents ?? [],
+        daemon: discovery.daemon,
+        diagnostic: discovery.diagnostic,
+      });
+      return;
+    }
+
+    const goal = await normalizeGoalWithAgent({
+      request: body.request,
+      context: { ...(body.context ?? {}), language },
+      agent: selection.selectedAgent,
+      language,
+      cliPath,
+      exec: assistExec,
+      timeoutMs: body.assist?.timeoutMs,
+    });
+    if (goal?.blocked) {
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "goal_normalization_blocked",
+        mode: "agent",
+        status: "blocked",
+        blocked_reason: goal.reason ?? "multica_agent_goal_clarification_failed",
+        agent_id: selection.selectedAgent?.id ?? "",
+        agent_name: selection.selectedAgent?.name ?? "",
+        issue_id: goal.diagnostic?.issue?.id ?? "",
+        run_id: goal.diagnostic?.run?.id ?? "",
+        language,
+      });
+      sendJson(response, 200, goal);
+      return;
+    }
+
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "goal_normalized",
+      mode: "agent",
+      status: goal.status,
+      target: goal.id,
+      summary: goal.title,
+      agent_id: goal.assist?.agent?.id ?? selection.selectedAgent?.id ?? "",
+      agent_name: goal.assist?.agent?.name ?? selection.selectedAgent?.name ?? "",
+      issue_id: goal.assist?.issue?.id ?? "",
+      issue_identifier: goal.assist?.issue?.identifier ?? "",
+      run_id: goal.assist?.run?.id ?? "",
+      clarification_question_count: goal.clarificationQuestions?.length ?? 0,
+      language,
+    });
+    sendJson(response, 200, { ok: true, goal, assist: goal.assist });
+    return;
+  }
+
+  if (body.mode === "llm") {
+    const discovery = await discoverLlmProviders({
+      userConfig: { ...llmProviderConfig, ...(body.llm ?? body.llmConfig ?? {}) },
+      env: llmEnv,
+      homeDir: llmHomeDir,
+      commandExists: llmCommandExists,
+      pathExists: llmPathExists,
+    });
+    if (!discovery.selectedProvider) {
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "goal_normalization_blocked",
+        status: "blocked",
+        blocked_reason: "no_llm_provider",
+        candidate_count: discovery.candidates?.length ?? 0,
+        language,
+      });
+      sendJson(response, 200, {
+        ok: false,
+        blocked: true,
+        reason: "no_llm_provider",
+        candidates: discovery.candidates ?? [],
+      });
+      return;
+    }
+
+    const goal = await normalizeGoalWithLlm({
+      request: body.request,
+      context: body.context,
+      language,
+      provider: discovery.selectedProvider,
+      invokeLlm: llmExec
+        ? ({ provider, request, context }) => import("./llm-assist.js").then(({ invokeLlmForGoalClarification }) => invokeLlmForGoalClarification({
+          provider,
+          request,
+          context: { ...(context ?? {}), language },
+          language,
+          exec: llmExec,
+        }))
+        : undefined,
+    });
+    if (goal?.blocked) {
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "goal_normalization_blocked",
+        status: "blocked",
+        provider_source: discovery.selectedProvider?.source ?? "",
+        provider_kind: discovery.selectedProvider?.kind ?? "",
+        provider_version: discovery.selectedProvider?.version ?? "",
+        model: discovery.selectedProvider?.model ?? "",
+        blocked_reason: goal.reason ?? "llm_goal_clarification_failed",
+        exit_code: goal.diagnostic?.result?.code ?? "",
+        stderr_excerpt: goal.diagnostic?.result?.stderrExcerpt ?? "",
+        language,
+      });
+      sendJson(response, 200, goal);
+      return;
+    }
+
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "goal_normalized",
+      mode: "llm",
+      status: goal.status,
+      target: goal.id,
+      summary: goal.title,
+      provider_source: discovery.selectedProvider?.source ?? "",
+      provider_kind: discovery.selectedProvider?.kind ?? "",
+      provider_version: discovery.selectedProvider?.version ?? "",
+      model: discovery.selectedProvider?.model ?? "",
+      clarification_question_count: goal.clarificationQuestions?.length ?? 0,
+      language,
+    });
+    sendJson(response, 200, { ok: true, goal });
+    return;
+  }
+
+  const goal = normalizeGoal({
+    request: body.request,
+    context: { ...(body.context ?? {}), language },
+    language,
+  });
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "goal_normalized",
+    mode: "deterministic",
+    status: goal.status,
+    target: goal.id,
+    summary: goal.title,
+    clarification_questions: goal.clarificationQuestions,
+    language,
+  });
+  sendJson(response, 200, { ok: true, goal });
+}
+
+async function handleAssistAgents({
+  response,
+  auditPath,
+  cliPath,
+  assistExec,
+}) {
+  const discovery = await discoverAssistAgents({ cliPath, exec: assistExec });
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "assist_agents_discovered",
+    status: discovery.status,
+    selected_agent_id: discovery.selectedAgent?.id ?? "",
+    selected_agent_name: discovery.selectedAgent?.name ?? "",
+    agent_count: discovery.agents?.length ?? 0,
+    daemon_status: discovery.daemon?.status ?? "",
+  });
+  sendJson(response, 200, { ok: true, ...discovery });
+}
+
+async function handleAssistDiagnose({
+  response,
+  auditPath,
+  cliPath,
+  assistExec,
+}) {
+  const diagnosis = await diagnoseAssistAgents({ cliPath, exec: assistExec });
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "assist_agents_diagnosed",
+    status: diagnosis.ok ? "ready" : "blocked",
+    selected_agent_id: diagnosis.selectedAgent?.id ?? "",
+    selected_agent_name: diagnosis.selectedAgent?.name ?? "",
+    blocked_reason: diagnosis.reason ?? "",
+    agent_count: diagnosis.agents?.length ?? 0,
+    daemon_status: diagnosis.daemon?.status ?? "",
+  });
+  sendJson(response, 200, diagnosis);
+}
+
+async function handleGoalLock({ request, response, auditPath }) {
+  const body = await readJsonBody(request);
+  const goal = lockGoalDraft(body.goal, { approvedBy: body.approvedBy });
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "goal_locked",
+    status: goal.status,
+    target: goal.id,
+    summary: goal.title,
+    approved_by: goal.approvedBy,
+  });
+  sendJson(response, 200, { ok: true, goal });
+}
+
+async function handlePlanGenerate({ request, response, auditPath }) {
+  const body = await readJsonBody(request);
+  const language = normalizeRequestLanguage(body);
+  const plan = generatePlanFromGoal({
+    goal: body.goal,
+    complexity: body.complexity,
+    availableAgents: body.availableAgents,
+    language,
+  });
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "plan_generated",
+    status: plan.status,
+    target: plan.id,
+    goal_id: plan.goalId,
+    summary: `Generated ${plan.complexity} plan with ${plan.steps.length} steps.`,
+    issue_split_recommendation: plan.issueSplitRecommendation,
+    language,
+  });
+  sendJson(response, 200, { ok: true, plan });
+}
+
+async function handleIssueSplitPreview({ request, response, auditPath }) {
+  const body = await readJsonBody(request);
+  const language = normalizeRequestLanguage(body);
+  const issueSplit = previewIssueSplit({
+    goal: body.goal,
+    plan: body.plan,
+    projectId: body.projectId,
+    priority: body.priority,
+    language,
+  });
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "issue_split_previewed",
+    status: issueSplit.mode,
+    target: issueSplit.id,
+    goal_id: body.goal?.id ?? "",
+    plan_id: body.plan?.id ?? "",
+    summary: issueSplit.summary,
+    issue_count: issueSplit.issues.length,
+    language,
+  });
+  sendJson(response, 200, { ok: true, issueSplit });
+}
+
+async function handleLlmProviders({
+  request,
+  response,
+  auditPath,
+  llmProviderConfig,
+  llmEnv,
+  llmHomeDir,
+  llmCommandExists,
+  llmPathExists,
+}) {
+  const requestConfig = readLlmConfigFromQuery(request);
+  const discovery = await discoverLlmProviders({
+    userConfig: { ...llmProviderConfig, ...requestConfig },
+    env: llmEnv,
+    homeDir: llmHomeDir,
+    commandExists: llmCommandExists,
+    pathExists: llmPathExists,
+  });
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "llm_providers_discovered",
+    status: discovery.status,
+    provider_source: discovery.selectedProvider?.source ?? "",
+    provider_kind: discovery.selectedProvider?.kind ?? "",
+    provider_version: discovery.selectedProvider?.version ?? "",
+    model: discovery.selectedProvider?.model ?? "",
+    candidate_count: discovery.candidates?.length ?? 0,
+  });
+  sendJson(response, 200, { ok: true, ...discovery });
+}
+
+async function handleLlmDiagnose({
+  request,
+  response,
+  auditPath,
+  llmProviderConfig,
+  llmEnv,
+  llmHomeDir,
+  llmCommandExists,
+  llmPathExists,
+  llmExec,
+}) {
+  const body = await readJsonBody(request);
+  const discovery = await discoverLlmProviders({
+    userConfig: { ...llmProviderConfig, ...(body.llm ?? body.llmConfig ?? {}) },
+    env: llmEnv,
+    homeDir: llmHomeDir,
+    commandExists: llmCommandExists,
+    pathExists: llmPathExists,
+  });
+  if (!discovery.selectedProvider) {
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "llm_provider_diagnosed",
+      status: "blocked",
+      blocked_reason: "no_llm_provider",
+      candidate_count: discovery.candidates?.length ?? 0,
+    });
+    sendJson(response, 200, {
+      ok: false,
+      blocked: true,
+      reason: "no_llm_provider",
+      candidates: discovery.candidates ?? [],
+    });
+    return;
+  }
+
+  const diagnosis = await diagnoseLlmProvider({
+    provider: discovery.selectedProvider,
+    probe: Boolean(body.probe),
+    exec: llmExec ?? undefined,
+    env: llmEnv,
+    pathExists: llmPathExists,
+  });
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "llm_provider_diagnosed",
+    status: diagnosis.ok ? "ready" : "blocked",
+    provider_source: discovery.selectedProvider?.source ?? "",
+    provider_kind: discovery.selectedProvider?.kind ?? "",
+    provider_version: discovery.selectedProvider?.version ?? "",
+    model: discovery.selectedProvider?.model ?? "",
+    blocked_reason: diagnosis.reason ?? "",
+    exit_code: diagnosis.diagnostic?.help?.code ?? diagnosis.diagnostic?.invocation?.result?.code ?? "",
+  });
+  sendJson(response, 200, {
+    ok: diagnosis.ok,
+    status: diagnosis.status,
+    blocked: diagnosis.blocked,
+    reason: diagnosis.reason,
+    provider: discovery.selectedProvider,
+    diagnostic: diagnosis.diagnostic,
+  });
+}
+
+async function handleLlmSecretMetadata({
+  request,
+  response,
+  auditPath,
+  llmProviderConfig,
+  llmEnv,
+  llmHomeDir,
+  llmPathExists,
+}) {
+  const body = await readJsonBody(request);
+  const providerConfig = { ...llmProviderConfig, ...(body.llm ?? body.llmConfig ?? {}) };
+  const provider = providerConfig.provider || providerConfig.command
+    ? {
+      provider: providerConfig.provider,
+      kind: providerConfig.provider,
+      command: providerConfig.command,
+      model: providerConfig.model,
+      source: "user-config",
+    }
+    : { kind: "codex", provider: "codex", source: "default" };
+  const result = await readLlmSecretMetadata({
+    provider,
+    confirm: body.confirm,
+    env: llmEnv,
+    homeDir: llmHomeDir,
+    pathExists: llmPathExists,
+  });
+
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "llm_secret_metadata_read",
+    status: result.ok ? "success" : "blocked",
+    provider: result.provider ?? provider.kind ?? provider.provider ?? "",
+    blocked_reason: result.reason ?? "",
+    risk: "secret-metadata-redacted",
+    entries: (result.metadata ?? []).map((item) => ({
+      provider: item.provider,
+      keyName: item.keyName,
+      pathHint: item.sourcePathHint,
+      present: item.present,
+      fingerprint: item.fingerprint,
+      status: item.present ? "present" : "missing",
+    })),
+  });
+
+  sendJson(response, result.ok ? 200 : 403, result);
+}
+
+async function handlePlanSplit({
+  request,
+  response,
+  auditPath,
+  cliPath,
+  assistExec,
+  llmProviderConfig,
+  llmEnv,
+  llmHomeDir,
+  llmCommandExists,
+  llmPathExists,
+  llmExec,
+}) {
+  const body = await readJsonBody(request);
+  const language = normalizeRequestLanguage(body);
+  if (body.mode === "agent") {
+    const discovery = await discoverAssistAgents({ cliPath, exec: assistExec });
+    const selection = selectAssistAgent({
+      agents: discovery.agents ?? [],
+      preferredAgentId: body.assist?.agentId,
+      mode: body.assist?.selectionMode || (body.assist?.agentId ? "manual" : "auto"),
+    });
+    if (!discovery.ok || !selection.ok) {
+      const reason = discovery.ok ? (selection.reason || "no_assist_agent") : (discovery.reason || "multica_cli_failed");
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "plan_set_generation_blocked",
+        mode: "agent",
+        status: "blocked",
+        goal_id: body.goal?.id ?? "",
+        blocked_reason: reason,
+        agent_count: discovery.agents?.length ?? 0,
+        language,
+      });
+      sendJson(response, 200, {
+        ok: false,
+        blocked: true,
+        reason,
+        agents: discovery.agents ?? [],
+        daemon: discovery.daemon,
+        diagnostic: discovery.diagnostic,
+      });
+      return;
+    }
+
+    const planSet = await splitGoalIntoPlansWithAgent({
+      goal: body.goal,
+      agent: selection.selectedAgent,
+      availableAgents: body.availableAgents ?? [],
+      language,
+      cliPath,
+      exec: assistExec,
+      timeoutMs: body.assist?.timeoutMs,
+    });
+    if (planSet?.blocked) {
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "plan_set_generation_blocked",
+        mode: "agent",
+        status: "blocked",
+        goal_id: body.goal?.id ?? "",
+        blocked_reason: planSet.reason ?? "multica_agent_plan_split_failed",
+        agent_id: selection.selectedAgent?.id ?? "",
+        agent_name: selection.selectedAgent?.name ?? "",
+        issue_id: planSet.diagnostic?.issue?.id ?? "",
+        run_id: planSet.diagnostic?.run?.id ?? "",
+        language,
+      });
+      sendJson(response, 200, planSet);
+      return;
+    }
+
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "plan_set_generated",
+      mode: "agent",
+      status: planSet.status,
+      target: planSet.id,
+      goal_id: planSet.goalId,
+      agent_id: planSet.assist?.agent?.id ?? selection.selectedAgent?.id ?? "",
+      agent_name: planSet.assist?.agent?.name ?? selection.selectedAgent?.name ?? "",
+      issue_id: planSet.assist?.issue?.id ?? "",
+      issue_identifier: planSet.assist?.issue?.identifier ?? "",
+      run_id: planSet.assist?.run?.id ?? "",
+      plan_count: planSet.plans?.length ?? 0,
+      summary: `Generated ${planSet.plans?.length ?? 0} Multica Agent assisted sub-plans.`,
+      language,
+    });
+
+    sendJson(response, 200, { ok: true, planSet, assist: planSet.assist });
+    return;
+  }
+
+  if (body.mode !== "llm") {
+    sendJson(response, 400, { ok: false, error: "unsupported plan split mode" });
+    return;
+  }
+  const discovery = await discoverLlmProviders({
+    userConfig: { ...llmProviderConfig, ...(body.llm ?? body.llmConfig ?? {}) },
+    env: llmEnv,
+    homeDir: llmHomeDir,
+    commandExists: llmCommandExists,
+    pathExists: llmPathExists,
+  });
+  if (!discovery.selectedProvider) {
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "plan_set_generation_blocked",
+      status: "blocked",
+      goal_id: body.goal?.id ?? "",
+        blocked_reason: "no_llm_provider",
+        candidate_count: discovery.candidates?.length ?? 0,
+        language,
+      });
+    sendJson(response, 200, {
+      ok: false,
+      blocked: true,
+      reason: "no_llm_provider",
+      candidates: discovery.candidates ?? [],
+    });
+    return;
+  }
+
+  const planSet = await splitGoalIntoPlansWithLlm({
+    goal: body.goal,
+    provider: discovery.selectedProvider,
+    availableAgents: body.availableAgents ?? [],
+    language,
+    invokeLlm: llmExec
+      ? ({ provider, goal, constraints }) => import("./llm-assist.js").then(({ invokeLlmForGoalPlanSplit }) => invokeLlmForGoalPlanSplit({
+        provider,
+        goal,
+        constraints,
+        language,
+        exec: llmExec,
+      }))
+      : undefined,
+  });
+  if (planSet?.blocked) {
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "plan_set_generation_blocked",
+      status: "blocked",
+      goal_id: body.goal?.id ?? "",
+      provider_source: discovery.selectedProvider?.source ?? "",
+      provider_kind: discovery.selectedProvider?.kind ?? "",
+      provider_version: discovery.selectedProvider?.version ?? "",
+      model: discovery.selectedProvider?.model ?? "",
+      blocked_reason: planSet.reason ?? "llm_plan_split_failed",
+      exit_code: planSet.diagnostic?.result?.code ?? "",
+      stderr_excerpt: planSet.diagnostic?.result?.stderrExcerpt ?? "",
+      language,
+    });
+    sendJson(response, 200, planSet);
+    return;
+  }
+
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "plan_set_generated",
+    status: planSet.status,
+    target: planSet.id,
+    goal_id: planSet.goalId,
+    provider_source: planSet.provider?.source ?? "",
+    provider_kind: planSet.provider?.kind ?? "",
+    provider_version: planSet.provider?.version ?? "",
+    model: planSet.provider?.model ?? "",
+    plan_count: planSet.plans?.length ?? 0,
+    summary: `Generated ${planSet.plans?.length ?? 0} LLM-assisted sub-plans.`,
+    language,
+  });
+
+  sendJson(response, 200, { ok: true, planSet });
+}
+
 async function handlePresetAction({
   request,
   response,
@@ -243,6 +990,31 @@ function listSessionPresets(sessionTeamPresets) {
   ];
 }
 
+function requestPathname(request) {
+  return new URL(request.url, "http://localhost").pathname;
+}
+
+function readLlmConfigFromQuery(request) {
+  const url = new URL(request.url, "http://localhost");
+  const command = url.searchParams.get("command") || "";
+  const model = url.searchParams.get("model") || "";
+  const timeoutMs = url.searchParams.get("timeoutMs") || "";
+  const provider = url.searchParams.get("provider") || inferProviderFromCommand(command);
+  return {
+    provider,
+    command,
+    model,
+    timeoutMs: timeoutMs ? Number(timeoutMs) : undefined,
+  };
+}
+
+function inferProviderFromCommand(command) {
+  const text = String(command || "").toLowerCase();
+  if (text.includes("claude")) return "claude";
+  if (text.includes("codex")) return "codex";
+  return "";
+}
+
 async function serveStatic({ request, response, root }) {
   const url = new URL(request.url, "http://localhost");
   const pathname = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
@@ -325,6 +1097,10 @@ function redact(value) {
     }
   }
   return out;
+}
+
+function normalizeRequestLanguage(body = {}) {
+  return String(body.language || body.context?.language || "zh-CN").toLowerCase() === "en-us" ? "en-US" : "zh-CN";
 }
 
 function mimeType(path) {

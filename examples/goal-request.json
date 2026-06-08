@@ -1,0 +1,8 @@
+{
+  "request": "实现 Goal Plan 模块，复杂任务可以拆成一个或多个 Multica issue，必须先预览不直接写入 Multica。",
+  "context": {
+    "project": "MulticaPlusPlus",
+    "source": "example",
+    "owner": "Codex"
+  }
+}
