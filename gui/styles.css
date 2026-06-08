@@ -762,13 +762,15 @@ button:disabled {
 
 .issue-preview-list {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.issue-preview-list li {
+.issue-preview-list li,
+.issue-preview-item {
   min-width: 0;
   padding: 8px 10px;
   border: 1px solid var(--line);
@@ -776,6 +778,82 @@ button:disabled {
   color: var(--muted);
   background: #0d0e10;
   overflow-wrap: anywhere;
+}
+
+.issue-preview-item {
+  display: grid;
+  gap: 8px;
+}
+
+.issue-description-preview {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.issue-metadata {
+  grid-template-columns: minmax(92px, 0.42fr) minmax(0, 1fr);
+}
+
+.issue-operation {
+  min-width: 0;
+}
+
+.issue-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.compact-button {
+  min-height: 32px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.issue-apply-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.confirm-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: #0b0c0d;
+}
+
+.created-issue-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.created-issue-list li {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-active);
+  color: #f3f4f5;
+  overflow-wrap: anywhere;
+}
+
+.error-text {
+  color: #ffb4b4;
 }
 
 .plan-set-card,
@@ -814,6 +892,69 @@ button:disabled {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.sub-plan-issue-status {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-active);
+}
+
+.sub-plan-issue-status p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.issue-subscription-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.subscription-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.subscription-summary-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #0d0e10;
+}
+
+.subscription-summary-item strong {
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.subscription-group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.subscription-group h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.subscription-comment {
+  color: var(--muted);
 }
 
 .section-label,
@@ -2283,11 +2424,24 @@ button:disabled {
   }
 
   .plan-table {
-    min-width: 680px;
+    min-width: 100%;
+    table-layout: fixed;
   }
 
   #plan-list {
-    overflow-x: auto;
+    overflow-x: hidden;
+  }
+
+  .goal-action-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .plan-task,
+  .plan-deps {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .scope-row {

@@ -1,6 +1,8 @@
 import { createReadStream } from "node:fs";
-import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { appendFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import { extname, join, normalize, resolve } from "node:path";
 
 import {
@@ -15,23 +17,37 @@ import {
   mergePresetOverrides,
 } from "./agent-preset.js";
 import {
+  applyIssueSplit,
   generatePlanFromGoal,
   lockGoalDraft,
   normalizeGoal,
   normalizeGoalWithAgent,
   normalizeGoalWithLlm,
   previewIssueSplit,
+  previewIssueSplitFromPlanSet,
   splitGoalIntoPlansWithAgent,
   splitGoalIntoPlansWithLlm,
 } from "./goal-plan.js";
 import { diagnoseLlmProvider, discoverLlmProviders, readLlmSecretMetadata } from "./llm-assist.js";
 import {
+  deleteIssueSubscription,
+  listIssueSubscriptions,
+  registerIssueSubscription,
+  setIssueSubscriptionState,
+  syncIssueSubscriptions,
+} from "./issue-subscriptions.js";
+import {
+  checkMulticaAgentAssistResult,
   diagnoseAssistAgents,
   discoverAssistAgents,
   selectAssistAgent,
+  providerFromAssistAgent,
+  startMulticaAgentForGoalClarification,
+  startMulticaAgentForPlanSplit,
 } from "./multica-agent-assist.js";
 
 const DEFAULT_AUDIT_PATH = "out/agent-config-events.jsonl";
+const DEFAULT_SUBSCRIPTION_STORE_PATH = "out/issue-subscriptions.json";
 const IMAGE2_CONFIRMATION_TOKEN = "CREATE-MULTICA-IMAGE2-CODEX-AGENT";
 const PRESET_CONFIRMATION_TOKEN = "CREATE-MULTICA-AGENT-FROM-PRESET";
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 5000;
@@ -42,6 +58,7 @@ export async function createGuiServer({
   port = 8787,
   guiDir = "gui",
   auditPath = DEFAULT_AUDIT_PATH,
+  subscriptionStorePath = DEFAULT_SUBSCRIPTION_STORE_PATH,
   cliPath = "multica",
   discoveryTimeoutMs = DEFAULT_DISCOVERY_TIMEOUT_MS,
   discoveryRetries = DEFAULT_DISCOVERY_RETRIES,
@@ -75,6 +92,7 @@ export async function createGuiServer({
           request,
           response,
           auditPath,
+          subscriptionStorePath,
           cliPath,
           assistExec: assistExec ?? exec,
           llmProviderConfig,
@@ -96,6 +114,51 @@ export async function createGuiServer({
       }
       if (request.method === "POST" && request.url === "/api/plan/preview-issues") {
         await handleIssueSplitPreview({ request, response, auditPath });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/plan/apply-issues") {
+        await handleIssueSplitApply({
+          request,
+          response,
+          auditPath,
+          subscriptionStorePath,
+          cliPath,
+          exec,
+        });
+        return;
+      }
+      if (request.method === "GET" && requestPathname(request) === "/api/issue-subscriptions") {
+        await handleIssueSubscriptionsList({ response, subscriptionStorePath });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/issue-subscriptions/sync") {
+        await handleIssueSubscriptionsSync({
+          request,
+          response,
+          auditPath,
+          subscriptionStorePath,
+          cliPath,
+          exec,
+        });
+        return;
+      }
+      const subscriptionActionMatch = requestPathname(request).match(/^\/api\/issue-subscriptions\/([^/]+)\/(pause|resume)$/);
+      if (request.method === "POST" && subscriptionActionMatch) {
+        await handleIssueSubscriptionState({
+          response,
+          subscriptionStorePath,
+          id: decodeURIComponent(subscriptionActionMatch[1]),
+          state: subscriptionActionMatch[2] === "pause" ? "paused" : "active",
+        });
+        return;
+      }
+      const subscriptionDeleteMatch = requestPathname(request).match(/^\/api\/issue-subscriptions\/([^/]+)$/);
+      if (request.method === "DELETE" && subscriptionDeleteMatch) {
+        await handleIssueSubscriptionDelete({
+          response,
+          subscriptionStorePath,
+          id: decodeURIComponent(subscriptionDeleteMatch[1]),
+        });
         return;
       }
       if (request.method === "GET" && requestPathname(request) === "/api/llm/providers") {
@@ -122,6 +185,26 @@ export async function createGuiServer({
       }
       if (request.method === "POST" && request.url === "/api/assist/diagnose") {
         await handleAssistDiagnose({
+          response,
+          auditPath,
+          cliPath,
+          assistExec: assistExec ?? exec,
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/assist/result") {
+        await handleAssistResult({
+          request,
+          response,
+          auditPath,
+          cliPath,
+          assistExec: assistExec ?? exec,
+        });
+        return;
+      }
+      if (request.method === "GET" && requestPathname(request) === "/api/assist/subscribe") {
+        await handleAssistSubscribe({
+          request,
           response,
           auditPath,
           cliPath,
@@ -160,6 +243,7 @@ export async function createGuiServer({
           request,
           response,
           auditPath,
+          subscriptionStorePath,
           cliPath,
           assistExec: assistExec ?? exec,
           llmProviderConfig,
@@ -276,6 +360,7 @@ async function handleGoalNormalize({
   request,
   response,
   auditPath,
+  subscriptionStorePath,
   cliPath,
   assistExec,
   llmProviderConfig,
@@ -314,6 +399,66 @@ async function handleGoalNormalize({
         daemon: discovery.daemon,
         diagnostic: discovery.diagnostic,
       });
+      return;
+    }
+
+    if (body.async === true) {
+      const assistIds = normalizeAssistIds({
+        kind: "goal",
+        body,
+        seed: body.request,
+      });
+      const start = await startMulticaAgentForGoalClarification({
+        request: body.request,
+        context: { ...(body.context ?? {}), language },
+        agent: selection.selectedAgent,
+        language,
+        assistChainId: assistIds.chainId,
+        assistRequestId: assistIds.requestId,
+        cliPath,
+        exec: assistExec,
+      });
+      if (!start?.ok) {
+        await appendAuditEvent(auditPath, {
+          timestamp: new Date().toISOString(),
+          source: "gui-server",
+          event_type: "goal_normalization_blocked",
+          mode: "agent",
+          status: "blocked",
+          blocked_reason: start.reason ?? "multica_agent_goal_clarification_failed",
+          agent_id: selection.selectedAgent?.id ?? "",
+          agent_name: selection.selectedAgent?.name ?? "",
+          issue_id: start.diagnostic?.issue?.id ?? "",
+          assist_chain_id: assistIds.chainId,
+          assist_request_id: assistIds.requestId,
+          language,
+        });
+        sendJson(response, 200, start);
+        return;
+      }
+      await registerIssueSubscriptionFromAssist({
+        subscriptionStorePath,
+        kind: "assist_goal",
+        source: "goal_clarification",
+        assist: start.assist,
+        title: `Goal 澄清 Assist Issue · ${body.request || "未命名目标"}`,
+        goalId: "",
+      });
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "goal_normalization_assist_started",
+        mode: "agent",
+        status: "pending",
+        agent_id: start.assist?.agent?.id ?? selection.selectedAgent?.id ?? "",
+        agent_name: start.assist?.agent?.name ?? selection.selectedAgent?.name ?? "",
+        issue_id: start.assist?.issue?.id ?? "",
+        issue_identifier: start.assist?.issue?.identifier ?? "",
+        assist_chain_id: assistIds.chainId,
+        assist_request_id: assistIds.requestId,
+        language,
+      });
+      sendJson(response, 200, start);
       return;
     }
 
@@ -504,6 +649,315 @@ async function handleAssistDiagnose({
   sendJson(response, 200, diagnosis);
 }
 
+async function handleAssistResult({
+  request,
+  response,
+  auditPath,
+  cliPath,
+  assistExec,
+}) {
+  const body = await readJsonBody(request);
+  const language = normalizeRequestLanguage(body);
+  const kind = body.kind === "planSet" ? "planSet" : "goal";
+  const issueId = body.issueId || body.assist?.issue?.id || "";
+  const checked = await checkMulticaAgentAssistResult({
+    kind,
+    issueId,
+    assistRequestId: body.assistRequestId || body.assist?.requestId || "",
+    agent: body.agent || body.assist?.agent,
+    cliPath,
+    exec: assistExec,
+  });
+
+  if (checked?.pending) {
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "assist_result_polled",
+      status: "pending",
+      kind,
+      issue_id: issueId,
+      run_id: checked.assist?.run?.id ?? "",
+      poll_count: body.pollCount ?? "",
+      assist_request_id: body.assistRequestId || body.assist?.requestId || "",
+      language,
+    });
+    sendJson(response, 200, checked);
+    return;
+  }
+
+  if (!checked?.ok) {
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "assist_result_polled",
+      status: "blocked",
+      kind,
+      issue_id: issueId,
+      run_id: checked?.diagnostic?.run?.id ?? "",
+      blocked_reason: checked?.reason ?? "multica_agent_result_failed",
+      output_source: checked?.diagnostic?.outputSource ?? "",
+      poll_count: body.pollCount ?? "",
+      assist_request_id: body.assistRequestId || body.assist?.requestId || "",
+      language,
+    });
+    sendJson(response, 200, checked);
+    return;
+  }
+
+  if (kind === "goal") {
+    const goal = await normalizeGoalWithLlm({
+      request: body.request,
+      context: { ...(body.context ?? {}), language },
+      language,
+      provider: providerFromAssistAgent(body.agent || checked.assist?.agent || {}),
+      invokeLlm: async () => ({
+        ok: true,
+        goalDraft: checked.goalDraft,
+        assist: checked.assist,
+        warnings: [],
+        diagnostic: checked.diagnostic,
+      }),
+    });
+    if (goal?.blocked) {
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "assist_result_polled",
+        status: "blocked",
+        kind,
+        issue_id: issueId,
+        run_id: checked.assist?.run?.id ?? "",
+        blocked_reason: goal.reason ?? "multica_agent_invalid_json",
+        output_source: checked.diagnostic?.outputSource ?? "",
+        language,
+      });
+      sendJson(response, 200, goal);
+      return;
+    }
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "assist_result_completed",
+      status: goal.status,
+      kind,
+      target: goal.id,
+      summary: goal.title,
+      issue_id: checked.assist?.issue?.id ?? issueId,
+      issue_identifier: checked.assist?.issue?.identifier ?? "",
+      run_id: checked.assist?.run?.id ?? "",
+      agent_id: checked.assist?.agent?.id ?? "",
+      agent_name: checked.assist?.agent?.name ?? "",
+      output_source: checked.diagnostic?.outputSource ?? "",
+      assist_request_id: body.assistRequestId || body.assist?.requestId || "",
+      clarification_question_count: goal.clarificationQuestions?.length ?? 0,
+      language,
+    });
+    sendJson(response, 200, {
+      ok: true,
+      status: "completed",
+      goal,
+      assist: checked.assist,
+      diagnostic: checked.diagnostic,
+    });
+    return;
+  }
+
+  const planSet = await splitGoalIntoPlansWithLlm({
+    goal: body.lockedGoal || body.goal,
+    provider: providerFromAssistAgent(body.agent || checked.assist?.agent || {}),
+    availableAgents: body.availableAgents ?? [],
+    language,
+    invokeLlm: async () => ({
+      ok: true,
+      planSetDraft: checked.planSetDraft,
+      assist: checked.assist,
+      warnings: [],
+      diagnostic: checked.diagnostic,
+    }),
+  });
+  if (planSet?.blocked) {
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "assist_result_polled",
+      status: "blocked",
+      kind,
+      issue_id: issueId,
+      run_id: checked.assist?.run?.id ?? "",
+      blocked_reason: planSet.reason ?? "multica_agent_invalid_json",
+      output_source: checked.diagnostic?.outputSource ?? "",
+      language,
+    });
+    sendJson(response, 200, planSet);
+    return;
+  }
+
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "assist_result_completed",
+    status: planSet.status,
+    kind,
+    target: planSet.id,
+    goal_id: planSet.goalId,
+    issue_id: checked.assist?.issue?.id ?? issueId,
+    issue_identifier: checked.assist?.issue?.identifier ?? "",
+    run_id: checked.assist?.run?.id ?? "",
+    agent_id: checked.assist?.agent?.id ?? "",
+    agent_name: checked.assist?.agent?.name ?? "",
+      output_source: checked.diagnostic?.outputSource ?? "",
+      assist_request_id: body.assistRequestId || body.assist?.requestId || "",
+      plan_count: planSet.plans?.length ?? 0,
+      language,
+  });
+
+  sendJson(response, 200, {
+    ok: true,
+    status: "completed",
+    planSet,
+    assist: checked.assist,
+    diagnostic: checked.diagnostic,
+  });
+}
+
+async function handleAssistSubscribe({
+  request,
+  response,
+  auditPath,
+  cliPath,
+  assistExec,
+}) {
+  const url = new URL(request.url, "http://localhost");
+  const kind = url.searchParams.get("kind") === "planSet" ? "planSet" : "goal";
+  const issueId = url.searchParams.get("issueId") || "";
+  const assistRequestId = url.searchParams.get("assistRequestId") || "";
+  const language = normalizeRequestLanguage({ language: url.searchParams.get("language") || "zh-CN" });
+  const intervalMs = boundedNumber(url.searchParams.get("intervalMs"), 5000, 1000, 60000);
+  const timeoutMs = boundedNumber(url.searchParams.get("timeoutMs"), 600000, 30000, 1800000);
+  const startedAt = Date.now();
+  let closed = false;
+  let pollCount = 0;
+
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+
+  const writeEvent = (event, data) => {
+    if (closed || response.destroyed) return;
+    response.write(`event: ${event}\n`);
+    response.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  request.on("close", () => {
+    closed = true;
+  });
+
+  writeEvent("ready", {
+    ok: true,
+    status: "subscribed",
+    kind,
+    issueId,
+    assistRequestId,
+    intervalMs,
+  });
+
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "assist_issue_subscribed",
+    status: "subscribed",
+    kind,
+    issue_id: issueId,
+    assist_request_id: assistRequestId,
+    interval_ms: intervalMs,
+    language,
+  });
+
+  while (!closed && Date.now() - startedAt <= timeoutMs) {
+    pollCount += 1;
+    const checked = await checkMulticaAgentAssistResult({
+      kind,
+      issueId,
+      assistRequestId,
+      cliPath,
+      exec: assistExec,
+    });
+    if (checked?.pending) {
+      writeEvent("pending", {
+        ok: true,
+        pending: true,
+        status: "pending",
+        kind,
+        issueId,
+        assist: checked.assist,
+        diagnostic: checked.diagnostic,
+        pollCount,
+      });
+    } else if (!checked?.ok) {
+      writeEvent("blocked", {
+        ...checked,
+        kind,
+        issueId,
+        pollCount,
+      });
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "assist_issue_subscription_finished",
+        status: "blocked",
+        kind,
+        issue_id: issueId,
+        run_id: checked?.diagnostic?.run?.id ?? "",
+        blocked_reason: checked?.reason ?? "multica_agent_result_failed",
+        output_source: checked?.diagnostic?.outputSource ?? "",
+        poll_count: pollCount,
+        language,
+      });
+      response.end();
+      return;
+    } else {
+      writeEvent("completed", {
+        ...checked,
+        kind,
+        issueId,
+        pollCount,
+      });
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "assist_issue_subscription_finished",
+        status: "completed",
+        kind,
+        issue_id: issueId,
+        run_id: checked.assist?.run?.id ?? "",
+        output_source: checked.diagnostic?.outputSource ?? "",
+        poll_count: pollCount,
+        language,
+      });
+      response.end();
+      return;
+    }
+    await delay(intervalMs);
+  }
+
+  if (!closed) {
+    writeEvent("blocked", {
+      ok: false,
+      blocked: true,
+      reason: "multica_agent_timeout",
+      kind,
+      issueId,
+      pollCount,
+      diagnostic: { timeoutMs },
+    });
+    response.end();
+  }
+}
+
 async function handleGoalLock({ request, response, auditPath }) {
   const body = await readJsonBody(request);
   const goal = lockGoalDraft(body.goal, { approvedBy: body.approvedBy });
@@ -545,13 +999,27 @@ async function handlePlanGenerate({ request, response, auditPath }) {
 async function handleIssueSplitPreview({ request, response, auditPath }) {
   const body = await readJsonBody(request);
   const language = normalizeRequestLanguage(body);
-  const issueSplit = previewIssueSplit({
-    goal: body.goal,
-    plan: body.plan,
-    projectId: body.projectId,
-    priority: body.priority,
-    language,
-  });
+  const hasPlan = Boolean(body.plan);
+  const hasPlanSet = Boolean(body.planSet);
+  if (hasPlan === hasPlanSet) {
+    sendJson(response, 400, { ok: false, error: "provide exactly one of plan or planSet" });
+    return;
+  }
+  const issueSplit = hasPlanSet
+    ? previewIssueSplitFromPlanSet({
+      goal: body.goal,
+      planSet: body.planSet,
+      projectId: body.projectId,
+      priority: body.priority,
+      language,
+    })
+    : previewIssueSplit({
+      goal: body.goal,
+      plan: body.plan,
+      projectId: body.projectId,
+      priority: body.priority,
+      language,
+    });
   await appendAuditEvent(auditPath, {
     timestamp: new Date().toISOString(),
     source: "gui-server",
@@ -560,11 +1028,150 @@ async function handleIssueSplitPreview({ request, response, auditPath }) {
     target: issueSplit.id,
     goal_id: body.goal?.id ?? "",
     plan_id: body.plan?.id ?? "",
+    plan_set_id: body.planSet?.id ?? "",
     summary: issueSplit.summary,
     issue_count: issueSplit.issues.length,
     language,
   });
   sendJson(response, 200, { ok: true, issueSplit });
+}
+
+async function handleIssueSplitApply({ request, response, auditPath, subscriptionStorePath, cliPath, exec }) {
+  const body = await readJsonBody(request);
+  const execute = body.execute === true;
+  const issueSplit = body.issueSplit;
+  const issuePreviewId = body.issuePreviewId || "";
+
+  try {
+    const result = execute
+      ? await applyIssueSplitWithGuiCli({
+        issueSplit,
+        issuePreviewId,
+        cliPath,
+        exec,
+        confirm: body.confirm,
+      })
+      : await applyIssueSplit({
+        issueSplit,
+        issuePreviewId,
+        execute: false,
+      });
+
+    if (execute && result.ok) {
+      await registerCreatedBusinessIssues({
+        subscriptionStorePath,
+        issueSplit,
+        createdIssues: result.createdIssues ?? [],
+      });
+    }
+
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "issue_split_apply",
+      status: result.ok ? (execute ? "success" : "planned") : "failed",
+      mode: result.mode,
+      issue_split_id: issueSplit?.id ?? "",
+      issue_preview_id: issuePreviewId,
+      issue_count: issueSplit?.issues?.length ?? 0,
+      created_issue_ids: result.createdIssues?.map((issue) => issue.id || issue.identifier).filter(Boolean) ?? [],
+      operation_count: result.operations?.length ?? 0,
+      error: result.ok ? "" : result.error ?? "",
+    });
+
+    sendJson(response, result.ok ? 200 : 500, { ok: result.ok, result });
+  } catch (error) {
+    const message = error.message || String(error);
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "issue_split_apply",
+      status: "blocked",
+      mode: execute ? "execute" : "dry-run",
+      issue_split_id: issueSplit?.id ?? "",
+      issue_preview_id: issuePreviewId,
+      issue_count: issueSplit?.issues?.length ?? 0,
+      error: message,
+    });
+    sendJson(response, message.includes("confirmation token required") ? 403 : 500, {
+      ok: false,
+      error: message,
+    });
+  }
+}
+
+async function applyIssueSplitWithGuiCli({ issueSplit, issuePreviewId, cliPath, exec, confirm }) {
+  const tempDir = await mkdtemp(join(tmpdir(), "multica-gui-issue-split-"));
+  try {
+    return await applyIssueSplit({
+      issueSplit,
+      issuePreviewId,
+      execute: true,
+      confirm,
+      exec: exec ?? createGuiCliExec({ cliPath }),
+      writeDescriptionFile: async (issue, index) => {
+        const path = join(tempDir, `issue-${index + 1}.md`);
+        await writeFile(path, issue.description ?? "", "utf8");
+        return path;
+      },
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function handleIssueSubscriptionsList({ response, subscriptionStorePath }) {
+  const result = await listIssueSubscriptions({ storePath: subscriptionStorePath });
+  sendJson(response, 200, result);
+}
+
+async function handleIssueSubscriptionsSync({
+  request,
+  response,
+  auditPath,
+  subscriptionStorePath,
+  cliPath,
+  exec,
+}) {
+  const body = await readJsonBody(request);
+  try {
+    const result = await syncIssueSubscriptions({
+      storePath: subscriptionStorePath,
+      exec: exec ?? createGuiCliExec({ cliPath }),
+      preferredIssueIds: Array.isArray(body.preferredIssueIds) ? body.preferredIssueIds : [],
+      limit: body.limit,
+    });
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "issue_subscriptions_synced",
+      status: "success",
+      synced_count: result.synced.length,
+      skipped_count: result.skipped.length,
+      warning: result.warning,
+    });
+    sendJson(response, 200, result);
+  } catch (error) {
+    const message = error.message || String(error);
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "issue_subscriptions_synced",
+      status: "failed",
+      error: message,
+    });
+    sendJson(response, 500, { ok: false, error: message });
+  }
+}
+
+async function handleIssueSubscriptionState({ response, subscriptionStorePath, id, state }) {
+  const result = await setIssueSubscriptionState({ storePath: subscriptionStorePath, id, state });
+  sendJson(response, 200, result);
+}
+
+async function handleIssueSubscriptionDelete({ response, subscriptionStorePath, id }) {
+  const result = await deleteIssueSubscription({ storePath: subscriptionStorePath, id });
+  sendJson(response, 200, result);
 }
 
 async function handleLlmProviders({
@@ -718,6 +1325,7 @@ async function handlePlanSplit({
   request,
   response,
   auditPath,
+  subscriptionStorePath,
   cliPath,
   assistExec,
   llmProviderConfig,
@@ -757,6 +1365,68 @@ async function handlePlanSplit({
         daemon: discovery.daemon,
         diagnostic: discovery.diagnostic,
       });
+      return;
+    }
+
+    if (body.async === true) {
+      const assistIds = normalizeAssistIds({
+        kind: "planSet",
+        body,
+        seed: body.goal?.id || body.goal?.objective || body.goal?.title,
+      });
+      const start = await startMulticaAgentForPlanSplit({
+        goal: body.goal,
+        agent: selection.selectedAgent,
+        availableAgents: body.availableAgents ?? [],
+        language,
+        assistChainId: assistIds.chainId,
+        assistRequestId: assistIds.requestId,
+        cliPath,
+        exec: assistExec,
+      });
+      if (!start?.ok) {
+        await appendAuditEvent(auditPath, {
+          timestamp: new Date().toISOString(),
+          source: "gui-server",
+          event_type: "plan_set_generation_blocked",
+          mode: "agent",
+          status: "blocked",
+          goal_id: body.goal?.id ?? "",
+          blocked_reason: start.reason ?? "multica_agent_plan_split_failed",
+          agent_id: selection.selectedAgent?.id ?? "",
+          agent_name: selection.selectedAgent?.name ?? "",
+          issue_id: start.diagnostic?.issue?.id ?? "",
+          assist_chain_id: assistIds.chainId,
+          assist_request_id: assistIds.requestId,
+          language,
+        });
+        sendJson(response, 200, start);
+        return;
+      }
+      await registerIssueSubscriptionFromAssist({
+        subscriptionStorePath,
+        kind: "assist_plan_split",
+        source: "plan_split",
+        assist: start.assist,
+        title: `Plan 拆分 Assist Issue · ${body.goal?.title || body.goal?.id || "未命名目标"}`,
+        goalId: body.goal?.id ?? "",
+      });
+      await appendAuditEvent(auditPath, {
+        timestamp: new Date().toISOString(),
+        source: "gui-server",
+        event_type: "plan_set_assist_started",
+        mode: "agent",
+        status: "pending",
+        goal_id: body.goal?.id ?? "",
+        agent_id: start.assist?.agent?.id ?? selection.selectedAgent?.id ?? "",
+        agent_name: start.assist?.agent?.name ?? selection.selectedAgent?.name ?? "",
+        issue_id: start.assist?.issue?.id ?? "",
+        issue_identifier: start.assist?.issue?.identifier ?? "",
+        assist_chain_id: assistIds.chainId,
+        assist_request_id: assistIds.requestId,
+        language,
+      });
+      sendJson(response, 200, start);
       return;
     }
 
@@ -983,6 +1653,64 @@ async function handleTeamPresetCreate({ request, response, sessionTeamPresets })
   sendJson(response, 201, { ok: true, preset });
 }
 
+async function registerIssueSubscriptionFromAssist({
+  subscriptionStorePath,
+  kind,
+  source,
+  assist,
+  title,
+  goalId,
+}) {
+  const issue = assist?.issue ?? {};
+  const issueId = String(issue.id ?? issue.identifier ?? "");
+  if (!issueId) return null;
+  return await registerIssueSubscription({
+    storePath: subscriptionStorePath,
+    subscription: {
+      kind,
+      issueId,
+      issueIdentifier: issue.identifier ?? "",
+      title: issue.title || title,
+      goalId,
+      source,
+      lastKnownStatus: issue.status ?? "",
+    },
+  });
+}
+
+async function registerCreatedBusinessIssues({
+  subscriptionStorePath,
+  issueSplit,
+  createdIssues,
+}) {
+  const issues = Array.isArray(issueSplit?.issues) ? issueSplit.issues : [];
+  const issueByPreviewId = new Map(issues.map((issue) => [String(issue.id ?? ""), issue]));
+  const results = [];
+  for (const created of createdIssues ?? []) {
+    const issuePreviewId = String(created.issuePreviewId ?? "");
+    const preview = issueByPreviewId.get(issuePreviewId) ?? {};
+    const issueId = String(created.id ?? created.identifier ?? "");
+    if (!issueId) continue;
+    const metadata = preview.metadata ?? created.metadata ?? {};
+    results.push(await registerIssueSubscription({
+      storePath: subscriptionStorePath,
+      subscription: {
+        kind: "business_issue",
+        issueId,
+        issueIdentifier: created.identifier ?? "",
+        title: created.title || preview.title || "业务 Issue",
+        goalId: metadata.goal_id ?? "",
+        planSetId: metadata.plan_set_id ?? "",
+        subplanId: metadata.subplan_id ?? "",
+        issueSplitId: issueSplit?.id ?? "",
+        source: "business_issue_apply",
+        lastKnownStatus: created.status ?? "",
+      },
+    }));
+  }
+  return results;
+}
+
 function listSessionPresets(sessionTeamPresets) {
   return [
     ...listAgentPresets(),
@@ -1064,6 +1792,40 @@ function sendJson(response, status, payload) {
   response.end(JSON.stringify(payload, null, 2));
 }
 
+function createGuiCliExec({ cliPath = "multica", timeoutMs = 30000 } = {}) {
+  return (args) => new Promise((resolveExec, rejectExec) => {
+    const command = cliPath.endsWith(".js") || cliPath.endsWith(".mjs") ? process.execPath : cliPath;
+    const commandArgs = command === cliPath ? args : [cliPath, ...args];
+    const child = spawn(command, commandArgs, { windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeoutMs);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", rejectExec);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolveExec({
+        stdout,
+        stderr: timedOut ? `command timed out after ${timeoutMs}ms` : stderr,
+        code: timedOut ? 124 : code,
+      });
+    });
+  });
+}
+
 function summarizePlan(plan) {
   return {
     ok: plan.ok,
@@ -1101,6 +1863,36 @@ function redact(value) {
 
 function normalizeRequestLanguage(body = {}) {
   return String(body.language || body.context?.language || "zh-CN").toLowerCase() === "en-us" ? "en-US" : "zh-CN";
+}
+
+function normalizeAssistIds({ kind, body = {}, seed = "" }) {
+  const chainId = body.assist?.chainId
+    || body.assistChainId
+    || `assist_${kind}_${stableHash(String(seed || kind))}`;
+  const requestId = body.assist?.requestId
+    || body.assistRequestId
+    || `request_${Date.now().toString(36)}_${stableHash(`${chainId}:${JSON.stringify(body.goal ?? body.request ?? {})}:${Date.now()}`)}`;
+  return { chainId, requestId };
+}
+
+function stableHash(value) {
+  const input = String(value ?? "");
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function boundedNumber(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function delay(ms) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
 function mimeType(path) {

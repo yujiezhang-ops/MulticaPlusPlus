@@ -152,6 +152,255 @@ test("gui server normalizes goal, locks it, generates plan, and previews issue s
   }
 });
 
+test("gui server previews business issues from an Agent planSet without Multica writes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-plan-set-preview-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      exec: async (args) => {
+        calls.push(args);
+        throw new Error("planSet issue preview should not call multica");
+      },
+    });
+
+    try {
+      const goal = sampleLockedGoal();
+      const planSet = samplePlanSet(goal);
+      const response = await fetch(`http://127.0.0.1:${server.port}/api/plan/preview-issues`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ goal, planSet, language: "zh-CN" }),
+      });
+
+      assert.equal(response.status, 200);
+      const payload = await response.json();
+      assert.equal(payload.ok, true);
+      assert.equal(payload.issueSplit.mode, "plan_set");
+      assert.equal(payload.issueSplit.issues.length, 2);
+      assert.equal(payload.issueSplit.issues[0].metadata.plan_set_id, planSet.id);
+      assert.equal(payload.issueSplit.issues[0].metadata.subplan_id, planSet.plans[0].id);
+      assert.equal(calls.length, 0);
+
+      const auditEvents = (await readFile(auditPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      assert.equal(auditEvents.at(-1).event_type, "issue_split_previewed");
+      assert.equal(auditEvents.at(-1).status, "plan_set");
+      assert.equal(auditEvents.at(-1).plan_set_id, planSet.id);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("gui server applies business issue split only with explicit confirmation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-issue-apply-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      exec: async (args) => {
+        calls.push(args);
+        if (args[0] === "issue" && args[1] === "create") {
+          return jsonResult({ id: `created-${calls.length}`, identifier: `SPA-${100 + calls.length}`, title: args[args.indexOf("--title") + 1] });
+        }
+        if (args[0] === "issue" && args[1] === "metadata" && args[2] === "set") {
+          return jsonResult({ ok: true });
+        }
+        throw new Error(`unexpected ${args.join(" ")}`);
+      },
+    });
+
+    try {
+      const issueSplit = sampleIssueSplit();
+      const dryRun = await fetch(`http://127.0.0.1:${server.port}/api/plan/apply-issues`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ issueSplit, execute: false }),
+      });
+      assert.equal(dryRun.status, 200);
+      const dryRunPayload = await dryRun.json();
+      assert.equal(dryRunPayload.ok, true);
+      assert.equal(dryRunPayload.result.mode, "dry-run");
+      assert.equal(calls.length, 0);
+
+      const rejected = await fetch(`http://127.0.0.1:${server.port}/api/plan/apply-issues`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ issueSplit, execute: true, confirm: "wrong" }),
+      });
+      assert.equal(rejected.status, 403);
+      const rejectedPayload = await rejected.json();
+      assert.equal(rejectedPayload.ok, false);
+      assert.match(rejectedPayload.error, /confirmation token required/);
+      assert.equal(calls.length, 0);
+
+      const applied = await fetch(`http://127.0.0.1:${server.port}/api/plan/apply-issues`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ issueSplit, execute: true, confirm: "APPLY-MULTICA-ISSUE-SPLIT" }),
+      });
+      assert.equal(applied.status, 200);
+      const appliedPayload = await applied.json();
+      assert.equal(appliedPayload.ok, true);
+      assert.equal(appliedPayload.result.mode, "execute");
+      assert.equal(appliedPayload.result.createdIssues.length, 2);
+      assert.ok(calls.some((args) => args[0] === "issue" && args[1] === "create"));
+      assert.ok(calls.some((args) => args[0] === "issue" && args[1] === "metadata" && args[2] === "set"));
+
+      const auditEvents = (await readFile(auditPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      assert.equal(auditEvents.at(-1).event_type, "issue_split_apply");
+      assert.equal(auditEvents.at(-1).status, "success");
+      assert.equal(auditEvents.at(-1).issue_count, 2);
+      assert.equal(JSON.stringify(auditEvents).includes(issueSplit.issues[0].description), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("gui server applies a single business issue candidate and registers its subscription", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-single-issue-apply-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const subscriptionStorePath = join(dir, "issue-subscriptions.json");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      subscriptionStorePath,
+      exec: async (args) => {
+        calls.push(args);
+        if (args[0] === "issue" && args[1] === "create") {
+          return jsonResult({ id: "created-2", identifier: "SPA-202", title: args[args.indexOf("--title") + 1], status: "todo" });
+        }
+        if (args[0] === "issue" && args[1] === "metadata" && args[2] === "set") {
+          return jsonResult({ ok: true });
+        }
+        throw new Error(`unexpected ${args.join(" ")}`);
+      },
+    });
+
+    try {
+      const issueSplit = sampleIssueSplit();
+      const response = await fetch(`http://127.0.0.1:${server.port}/api/plan/apply-issues`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          issueSplit,
+          issuePreviewId: "issue-preview-2",
+          execute: true,
+          confirm: "APPLY-MULTICA-ISSUE-SPLIT",
+        }),
+      });
+
+      assert.equal(response.status, 200);
+      const payload = await response.json();
+      assert.equal(payload.ok, true);
+      assert.deepEqual(payload.result.createdIssues.map((issue) => issue.issuePreviewId), ["issue-preview-2"]);
+      assert.equal(calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
+
+      const listResponse = await fetch(`http://127.0.0.1:${server.port}/api/issue-subscriptions`);
+      const listPayload = await listResponse.json();
+      assert.equal(listPayload.ok, true);
+      assert.equal(listPayload.subscriptions.length, 1);
+      assert.equal(listPayload.subscriptions[0].kind, "business_issue");
+      assert.equal(listPayload.subscriptions[0].issueId, "created-2");
+      assert.equal(listPayload.subscriptions[0].issueSplitId, issueSplit.id);
+      assert.equal(listPayload.subscriptions[0].subplanId, "subplan-2");
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("gui server subscription sync uses read-only issue commands and exposes grouped state", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-subscriptions-sync-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const subscriptionStorePath = join(dir, "issue-subscriptions.json");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      subscriptionStorePath,
+      exec: async (args) => {
+        calls.push(args);
+        if (args[0] === "issue" && args[1] === "create") {
+          return jsonResult({ id: "business-1", identifier: "SPA-301", title: args[args.indexOf("--title") + 1], status: "todo" });
+        }
+        if (args[0] === "issue" && args[1] === "metadata" && args[2] === "set") {
+          return jsonResult({ ok: true });
+        }
+        if (args.join(" ") === "issue list --output json") {
+          return jsonResult([{ id: "business-1", identifier: "SPA-301", title: "业务 Issue", status: "in_progress" }]);
+        }
+        if (args.join(" ") === "issue runs business-1 --output json") {
+          return jsonResult([{ id: "run-business-1", status: "running" }]);
+        }
+        if (args.join(" ") === "issue comment list business-1 --output json") {
+          return jsonResult([{ id: "comment-1", content: "正在处理业务 Issue，token=secret-value" }]);
+        }
+        throw new Error(`unexpected ${args.join(" ")}`);
+      },
+    });
+
+    try {
+      const issueSplit = {
+        ...sampleIssueSplit(),
+        issues: [sampleIssueSplit().issues[0]],
+      };
+      const apply = await fetch(`http://127.0.0.1:${server.port}/api/plan/apply-issues`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ issueSplit, execute: true, confirm: "APPLY-MULTICA-ISSUE-SPLIT" }),
+      });
+      assert.equal(apply.status, 200);
+
+      const sync = await fetch(`http://127.0.0.1:${server.port}/api/issue-subscriptions/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ preferredIssueIds: ["business-1"] }),
+      });
+      assert.equal(sync.status, 200);
+      const syncPayload = await sync.json();
+      assert.equal(syncPayload.ok, true);
+      assert.equal(syncPayload.synced[0].lastKnownStatus, "in_progress");
+      assert.equal(syncPayload.synced[0].lastRunStatus, "running");
+      assert.equal(syncPayload.synced[0].lastCommentExcerpt.includes("secret-value"), false);
+      assert.deepEqual(
+        calls.filter((args) => args[0] === "issue").map((args) => args.slice(0, 3)).filter((parts) => parts[1] !== "create" && parts[1] !== "metadata"),
+        [
+          ["issue", "list", "--output"],
+          ["issue", "runs", "business-1"],
+          ["issue", "comment", "list"],
+        ],
+      );
+
+      const auditEvents = (await readFile(auditPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      assert.equal(auditEvents.at(-1).event_type, "issue_subscriptions_synced");
+      assert.equal(JSON.stringify(auditEvents).includes("secret-value"), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("gui server normalizes a goal through LLM with a mock provider", async () => {
   const dir = await mkdtemp(join(tmpdir(), "multica-gui-goal-llm-"));
   try {
@@ -362,6 +611,126 @@ test("gui server normalizes a goal through Multica Agent assist", async () => {
   }
 });
 
+test("gui server starts async Multica Agent goal clarification and later reads comment JSON result", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-goal-agent-async-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      assistExec: mockAssistExec({
+        calls,
+        planDraft: sampleLlmPlanDraft(),
+        goalDraft: sampleLlmGoalDraft(),
+        asyncRuns: true,
+        goalCommentDraft: sampleLlmGoalDraft(),
+      }),
+    });
+
+    try {
+      const startResponse = await fetch(`http://127.0.0.1:${server.port}/api/goal/normalize`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          request: "澄清一个复杂目标",
+          mode: "agent",
+          async: true,
+          language: "zh-CN",
+          assist: { selectionMode: "auto" },
+        }),
+      });
+
+      assert.equal(startResponse.status, 200);
+      const startPayload = await startResponse.json();
+      assert.equal(startPayload.ok, true);
+      assert.equal(startPayload.pending, true);
+      assert.equal(startPayload.assist.issue.id, "issue-goal");
+      assert.equal(calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
+
+      const resultResponse = await fetch(`http://127.0.0.1:${server.port}/api/assist/result`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "goal",
+          issueId: "issue-goal",
+          agent: startPayload.assist.agent,
+          request: "澄清一个复杂目标",
+          context: { project: "MulticaPlusPlus" },
+          language: "zh-CN",
+        }),
+      });
+
+      assert.equal(resultResponse.status, 200);
+      const resultPayload = await resultResponse.json();
+      assert.equal(resultPayload.ok, true);
+      assert.equal(resultPayload.status, "completed");
+      assert.equal(resultPayload.goal.title, sampleLlmGoalDraft().title);
+      assert.equal(resultPayload.diagnostic.outputSource, "comments");
+      assert.equal(calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("gui server streams assist inbox subscription completion from comment JSON", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-assist-subscribe-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      assistExec: mockAssistExec({
+        calls,
+        planDraft: sampleLlmPlanDraft(),
+        goalDraft: sampleLlmGoalDraft(),
+        asyncRuns: true,
+        goalCommentDraft: sampleLlmGoalDraft(),
+      }),
+    });
+
+    try {
+      const startResponse = await fetch(`http://127.0.0.1:${server.port}/api/goal/normalize`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          request: "澄清一个复杂目标",
+          mode: "agent",
+          async: true,
+          language: "zh-CN",
+          assist: {
+            selectionMode: "auto",
+            chainId: "assist_goal_test",
+            requestId: "request_goal_test",
+          },
+        }),
+      });
+      const startPayload = await startResponse.json();
+      assert.equal(startPayload.pending, true);
+      assert.equal(startPayload.assistChainId, "assist_goal_test");
+      assert.equal(startPayload.assistRequestId, "request_goal_test");
+
+      const streamResponse = await fetch(`http://127.0.0.1:${server.port}/api/assist/subscribe?kind=goal&issueId=issue-goal&assistRequestId=request_goal_test&intervalMs=1000&timeoutMs=30000`);
+      assert.equal(streamResponse.status, 200);
+      const text = await streamResponse.text();
+      assert.match(text, /event: ready/);
+      assert.match(text, /event: completed/);
+      assert.match(text, /"outputSource":"comments"/);
+      assert.equal(calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("gui server splits a locked goal into LLM-assisted planSet with a mock provider", async () => {
   const dir = await mkdtemp(join(tmpdir(), "multica-gui-plan-split-"));
   try {
@@ -484,6 +853,83 @@ test("gui server splits a locked goal through Multica Agent assist", async () =>
       assert.equal(auditEvents.at(-1).language, "zh-CN");
       assert.equal(JSON.stringify(auditEvents).includes("Detect local Agent CLI providers"), false);
       assert.equal(JSON.stringify(auditEvents).includes("sk-"), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("gui server starts async Multica Agent plan split and later reads comment JSON result", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-plan-agent-async-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      assistExec: mockAssistExec({
+        calls,
+        planDraft: sampleLlmPlanDraft(),
+        goalDraft: sampleLlmGoalDraft(),
+        asyncRuns: true,
+        planCommentDraft: sampleLlmPlanDraft(),
+      }),
+    });
+
+    try {
+      const goal = {
+        id: "goal-1",
+        status: "locked",
+        title: "Agent async split",
+        objective: "Split a locked goal into multiple plans.",
+        successCriteria: ["Plan set returned"],
+        constraints: ["preview-first"],
+        language: "zh-CN",
+      };
+      const startResponse = await fetch(`http://127.0.0.1:${server.port}/api/plan/split`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          goal,
+          mode: "agent",
+          async: true,
+          language: "zh-CN",
+          assist: { selectionMode: "auto" },
+          availableAgents: [{ id: "planner-agent", role: "planner" }],
+        }),
+      });
+
+      assert.equal(startResponse.status, 200);
+      const startPayload = await startResponse.json();
+      assert.equal(startPayload.ok, true);
+      assert.equal(startPayload.pending, true);
+      assert.equal(startPayload.assist.issue.id, "issue-plan");
+      assert.equal(calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
+
+      const resultResponse = await fetch(`http://127.0.0.1:${server.port}/api/assist/result`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "planSet",
+          issueId: "issue-plan",
+          agent: startPayload.assist.agent,
+          lockedGoal: goal,
+          availableAgents: [{ id: "planner-agent", role: "planner" }],
+          language: "zh-CN",
+        }),
+      });
+
+      assert.equal(resultResponse.status, 200);
+      const resultPayload = await resultResponse.json();
+      assert.equal(resultPayload.ok, true);
+      assert.equal(resultPayload.status, "completed");
+      assert.equal(resultPayload.planSet.goalId, goal.id);
+      assert.equal(resultPayload.planSet.plans.length, 2);
+      assert.equal(resultPayload.diagnostic.outputSource, "comments");
+      assert.equal(calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
     } finally {
       await server.close();
     }
@@ -948,7 +1394,102 @@ function textResult(stdout) {
   return { stdout, stderr: "", code: 0 };
 }
 
-function mockAssistExec({ calls = [], prompts = [], planDraft, goalDraft }) {
+function sampleLockedGoal() {
+  return {
+    id: "goal-1",
+    status: "locked",
+    title: "实现 Plan 到 Issue 闭环",
+    objective: "从 PlanSet 预览并创建业务 Multica Issue。",
+    owner: "Codex",
+    source: "gui-test",
+    successCriteria: ["Issue preview returned", "Issue creation requires confirmation"],
+    constraints: ["preview-first"],
+    language: "zh-CN",
+  };
+}
+
+function samplePlanSet(goal = sampleLockedGoal()) {
+  return {
+    id: "plan-set-1",
+    goalId: goal.id,
+    status: "draft",
+    language: "zh-CN",
+    splitMode: "parallel",
+    strategy: "llm-assisted-workstreams",
+    provider: { id: "provider-multica-agent", kind: "multica-agent", source: "multica-agent" },
+    plans: [
+      {
+        id: "subplan-1",
+        number: 1,
+        title: "业务 Issue 预览",
+        objective: "生成可审查的业务 Issue 候选。",
+        workstream: { id: "preview", label: "Preview", reason: "Independent." },
+        suggestedAgent: "planner-agent",
+        dependencies: [],
+        steps: [
+          { number: 1, title: "生成候选", status: "pending", dependencies: [], acceptanceEvidence: "Issue candidate visible." },
+          { number: 2, title: "检查 metadata", status: "pending", dependencies: [1], acceptanceEvidence: "Metadata included." },
+        ],
+        acceptanceEvidence: "Issue preview includes one candidate.",
+      },
+      {
+        id: "subplan-2",
+        number: 2,
+        title: "业务 Issue 创建",
+        objective: "确认后创建真实业务 Issue。",
+        workstream: { id: "apply", label: "Apply", reason: "Requires explicit confirmation." },
+        suggestedAgent: "executor-agent",
+        dependencies: [],
+        steps: [
+          { number: 1, title: "校验 token", status: "pending", dependencies: [], acceptanceEvidence: "Wrong token is blocked." },
+          { number: 2, title: "调用 Multica CLI", status: "pending", dependencies: [1], acceptanceEvidence: "Issue id returned." },
+        ],
+        acceptanceEvidence: "Issue creation returns created issue ids.",
+      },
+    ],
+    warnings: [],
+  };
+}
+
+function sampleIssueSplit() {
+  const goal = sampleLockedGoal();
+  const planSet = samplePlanSet(goal);
+  return {
+    id: "issue-split-1",
+    mode: "plan_set",
+    language: "zh-CN",
+    confirmationRequired: true,
+    confirmationToken: "APPLY-MULTICA-ISSUE-SPLIT",
+    summary: "确认后将创建 2 个业务 Issue。",
+    issues: planSet.plans.map((plan) => ({
+      id: `issue-preview-${plan.number}`,
+      title: `${goal.title} · ${plan.title}`,
+      description: `目标：${goal.objective}\n\nPlan：${plan.objective}`,
+      priority: "medium",
+      projectId: "",
+      metadata: {
+        source: "multicaplusplus",
+        goal_id: goal.id,
+        plan_set_id: planSet.id,
+        subplan_id: plan.id,
+        workstream_id: plan.workstream.id,
+        split_mode: "plan_set",
+        provider_source: "multica-agent",
+      },
+    })),
+    operations: [],
+  };
+}
+
+function mockAssistExec({
+  calls = [],
+  prompts = [],
+  planDraft,
+  goalDraft,
+  asyncRuns = false,
+  goalCommentDraft,
+  planCommentDraft,
+}) {
   return async (args) => {
     calls.push(args);
     const key = args.join(" ");
@@ -967,13 +1508,16 @@ function mockAssistExec({ calls = [], prompts = [], planDraft, goalDraft }) {
         { id: "agent-lead", name: "Claude-Lead", description: "planner architect leader", model: "pa/claude-opus", status: "idle", runtime_id: "rt-lead", runtime_mode: "local" },
       ]);
     }
+    if (args[0] === "issue" && args[1] === "search") {
+      return jsonResult([]);
+    }
     if (args[0] === "issue" && args[1] === "create") {
       const title = args[args.indexOf("--title") + 1] || "";
       const descriptionFile = args[args.indexOf("--description-file") + 1];
       if (descriptionFile) {
         prompts.push(await readFile(descriptionFile, "utf8"));
       }
-      const isGoal = title.includes("Goal clarification");
+      const isGoal = title.includes("Goal clarification") || title.includes("Inbox · Goal");
       return jsonResult({
         id: isGoal ? "issue-goal" : "issue-plan",
         identifier: isGoal ? "SPA-99" : "SPA-100",
@@ -983,11 +1527,32 @@ function mockAssistExec({ calls = [], prompts = [], planDraft, goalDraft }) {
         assignee_type: "agent",
       });
     }
+    if (args[0] === "issue" && args[1] === "subscriber" && args[2] === "add") {
+      return jsonResult({ ok: true, issue_id: args[3] });
+    }
     if (key === "issue runs issue-goal --output json") {
+      if (asyncRuns) {
+        return jsonResult([{ id: "run-goal", status: "completed", agent_id: "agent-lead", runtime_id: "rt-lead", result: { output: "Agent 已完成 Goal 澄清，JSON 已写入评论。" } }]);
+      }
       return jsonResult([{ id: "run-goal", status: "completed", agent_id: "agent-lead", runtime_id: "rt-lead", result: { output: JSON.stringify(goalDraft) } }]);
     }
     if (key === "issue runs issue-plan --output json") {
+      if (asyncRuns) {
+        return jsonResult([{ id: "run-plan", status: "completed", agent_id: "agent-lead", runtime_id: "rt-lead", result: { output: "Agent 已完成 Plan 拆分，JSON 已写入评论。" } }]);
+      }
       return jsonResult([{ id: "run-plan", status: "completed", agent_id: "agent-lead", runtime_id: "rt-lead", result: { output: JSON.stringify(planDraft) } }]);
+    }
+    if (key === "issue run-messages run-goal --issue issue-goal --output json") {
+      return jsonResult([{ id: "message-goal", content: "过程摘要：已处理。" }]);
+    }
+    if (key === "issue run-messages run-plan --issue issue-plan --output json") {
+      return jsonResult([{ id: "message-plan", content: "过程摘要：已处理。" }]);
+    }
+    if (key === "issue comment list issue-goal --output json") {
+      return jsonResult([{ id: "comment-goal", content: JSON.stringify(goalCommentDraft || goalDraft) }]);
+    }
+    if (key === "issue comment list issue-plan --output json") {
+      return jsonResult([{ id: "comment-plan", content: JSON.stringify(planCommentDraft || planDraft) }]);
     }
     throw new Error(`unexpected ${key}`);
   };

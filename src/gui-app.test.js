@@ -474,6 +474,47 @@ test("GUI separates Goal/Plan control and permissions into distinct pages", asyn
   assert.equal(controlNav.getAttribute("aria-current"), "false");
 });
 
+test("GUI surfaces Multica assist issue create diagnostics during goal clarification", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document } = createTinyDocument();
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url) => {
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/goal/normalize") {
+        return responseJson({
+          ok: false,
+          blocked: true,
+          reason: "multica_issue_duplicate_blocked",
+          diagnostic: {
+            create: {
+              code: 1,
+              stderrExcerpt: "active duplicate issue already exists",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.querySelector("[data-action='clarify-goal']"));
+
+  const clarifyButton = document.querySelector("[data-action='clarify-goal']");
+  clarifyButton.dispatchEvent({ type: "click", target: clarifyButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const pageText = document.textContent();
+  assert.ok(pageText.includes("Multica 拦截了重复 assist issue"));
+  assert.ok(pageText.includes("active duplicate issue already exists"));
+});
+
 test("GUI blocks Agent-assisted plan split when no agent is available", async () => {
   const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
   const { document, clickLog } = createTinyDocument();
@@ -593,9 +634,32 @@ test("GUI renders multiple Agent-assisted parallel Plan cards", async () => {
       if (url === "/api/plan/split") {
         const body = JSON.parse(options.body);
         assert.equal(body.mode, "agent");
+        assert.equal(body.async, true);
         assert.equal(body.language, "zh-CN");
         return responseJson({
           ok: true,
+          pending: true,
+          assist: {
+            agent: { id: "agent-lead", name: "Claude-Lead" },
+            issue: { id: "issue-plan", identifier: "SPA-100", status: "todo" },
+          },
+          assistChainId: body.assist.chainId,
+          assistRequestId: body.assist.requestId,
+        });
+      }
+      if (url === "/api/assist/result") {
+        const body = JSON.parse(options.body);
+        assert.equal(body.kind, "planSet");
+        assert.equal(body.issueId, "issue-plan");
+        return responseJson({
+          ok: true,
+          status: "completed",
+          diagnostic: { outputSource: "comments" },
+          assist: {
+            agent: { id: "agent-lead", name: "Claude-Lead" },
+            issue: { id: "issue-plan", identifier: "SPA-100", status: "todo" },
+            run: { id: "run-plan", status: "completed" },
+          },
           planSet: {
             id: "plan_set_1",
             status: "draft",
@@ -644,7 +708,10 @@ test("GUI renders multiple Agent-assisted parallel Plan cards", async () => {
       throw new Error(`unexpected fetch ${url}`);
     },
     console,
-    setTimeout,
+    setTimeout: (fn) => {
+      fn();
+      return 1;
+    },
     clearTimeout,
     Date,
   });
@@ -665,6 +732,524 @@ test("GUI renders multiple Agent-assisted parallel Plan cards", async () => {
   assert.ok(document.textContent().includes("并行 Plan"));
   assert.ok(document.textContent().includes("Claude-Lead"));
   assert.ok(document.textContent().includes("SPA-100"));
+});
+
+test("GUI previews and explicitly creates business issues from an Agent PlanSet", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const storage = createMemoryStorage();
+  storage.setItem("multica-plusplus.workflow.v1", JSON.stringify({
+    version: 1,
+    language: "zh-CN",
+    goalRequest: "实现 Goal Plan 模块",
+    lockedGoal: {
+      id: "goal-1",
+      status: "locked",
+      title: "实现 Goal Plan 模块",
+      objective: "拆分为多个计划。",
+      successCriteria: ["PlanSet can be generated"],
+      constraints: ["preview-first"],
+      language: "zh-CN",
+    },
+    planSet: {
+      id: "plan_set_1",
+      goalId: "goal-1",
+      status: "draft",
+      language: "zh-CN",
+      splitMode: "parallel",
+      strategy: "llm-assisted-workstreams",
+      provider: { id: "provider-multica-agent", kind: "multica-agent", command: "multica", model: "pa/claude-opus", source: "multica-agent" },
+      assist: {
+        agent: { id: "agent-lead", name: "Claude-Lead" },
+        issue: { id: "assist-issue", identifier: "SPA-100" },
+      },
+      plans: [
+        {
+          id: "subplan-1",
+          number: 1,
+          title: "目标澄清 Plan",
+          objective: "完成目标澄清。",
+          workstream: { id: "goal", label: "目标", reason: "独立工作流。" },
+          suggestedAgent: "planner-agent",
+          dependencies: [],
+          steps: [{ number: 1, title: "澄清目标", status: "pending", dependencies: [] }],
+          acceptanceEvidence: "目标可锁定。",
+        },
+        {
+          id: "subplan-2",
+          number: 2,
+          title: "计划拆分 Plan",
+          objective: "完成计划拆分。",
+          workstream: { id: "plan", label: "计划", reason: "独立工作流。" },
+          suggestedAgent: "planner-agent",
+          dependencies: [],
+          steps: [{ number: 1, title: "拆分计划", status: "pending", dependencies: [] }],
+          acceptanceEvidence: "PlanSet 可预览业务 Issue。",
+        },
+      ],
+      warnings: [],
+    },
+  }));
+  const { document } = createTinyDocument();
+  const fetchCalls = [];
+
+  new Script(appSource).runInContext(createContext({
+    document,
+    window: { localStorage: storage },
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/plan/preview-issues") {
+        const body = JSON.parse(options.body);
+        assert.equal(body.goal.id, "goal-1");
+        assert.equal(body.planSet.id, "plan_set_1");
+        assert.equal(body.plan, undefined);
+        assert.equal(body.language, "zh-CN");
+        return responseJson({
+          ok: true,
+          issueSplit: {
+            id: "issue_split_1",
+            mode: "plan_set",
+            confirmationRequired: true,
+            confirmationToken: "APPLY-MULTICA-ISSUE-SPLIT",
+            summary: "将为 2 个并行 Plan 预览 2 个业务 Multica Issue。",
+            issues: [
+              {
+                id: "issue_preview_1",
+                title: "实现 Goal Plan 模块 · 目标澄清 Plan",
+                priority: "medium",
+                description: "## 业务 Issue\n完成目标澄清，不会自动创建 assist issue。",
+                metadata: { goal_id: "goal-1", plan_set_id: "plan_set_1", subplan_id: "subplan-1" },
+              },
+              {
+                id: "issue_preview_2",
+                title: "实现 Goal Plan 模块 · 计划拆分 Plan",
+                priority: "medium",
+                description: "## 业务 Issue\n完成计划拆分，确认后写入 Multica。",
+                metadata: { goal_id: "goal-1", plan_set_id: "plan_set_1", subplan_id: "subplan-2" },
+              },
+            ],
+            operations: [
+              { type: "issue:create", displayCommand: "multica issue create --title \"实现 Goal Plan 模块 · 目标澄清 Plan\" --description-file <file> --priority medium --output json" },
+              { type: "issue:create", displayCommand: "multica issue create --title \"实现 Goal Plan 模块 · 计划拆分 Plan\" --description-file <file> --priority medium --output json" },
+            ],
+          },
+        });
+      }
+      if (url === "/api/plan/apply-issues") {
+        const body = JSON.parse(options.body);
+        assert.equal(body.execute, true);
+        assert.equal(body.confirm, "APPLY-MULTICA-ISSUE-SPLIT");
+        if (body.issuePreviewId) {
+          assert.equal(body.issuePreviewId, "issue_preview_2");
+          return responseJson({
+            ok: true,
+            result: {
+              ok: true,
+              mode: "execute",
+              issueSplitId: "issue_split_1",
+              createdIssues: [
+                { id: "issue-2", identifier: "SPA-202", title: "实现 Goal Plan 模块 · 计划拆分 Plan", issuePreviewId: "issue_preview_2" },
+              ],
+              operations: [],
+            },
+          });
+        }
+        return responseJson({
+          ok: true,
+          result: {
+            ok: true,
+            mode: "execute",
+            issueSplitId: "issue_split_1",
+            createdIssues: [
+              { id: "issue-1", identifier: "SPA-201", title: "实现 Goal Plan 模块 · 目标澄清 Plan" },
+              { id: "issue-2", identifier: "SPA-202", title: "实现 Goal Plan 模块 · 计划拆分 Plan" },
+            ],
+            operations: [],
+          },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  }));
+  await waitFor(() => document.querySelector("[data-action='preview-issue-split']"));
+
+  const previewButton = document.querySelector("[data-action='preview-issue-split']");
+  previewButton.dispatchEvent({ type: "click", target: previewButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(document.textContent().includes("Plan 到 Issue 预览"));
+  assert.ok(document.textContent().includes("预览业务 Issue"));
+  assert.ok(document.textContent().includes("创建全部 Multica Issue"));
+  assert.ok(document.textContent().includes("创建此 Issue"));
+  assert.ok(document.textContent().includes("复制命令"));
+  assert.ok(document.textContent().includes("plan_set_1"));
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/generate").length, 0);
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/apply-issues").length, 0);
+
+  const createButton = document.querySelector("[data-action='apply-issue-split']");
+  createButton.dispatchEvent({ type: "click", target: createButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(document.textContent().includes("必须输入 APPLY-MULTICA-ISSUE-SPLIT"));
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/apply-issues").length, 0);
+
+  document.querySelector("#issue-split-confirm").value = "APPLY-MULTICA-ISSUE-SPLIT";
+  const singleCreateButton = document.querySelector("[data-action='apply-single-issue'][data-issue-preview-id='issue_preview_2']");
+  assert.ok(singleCreateButton, "single issue create button should render for each preview card");
+  singleCreateButton.dispatchEvent({ type: "click", target: singleCreateButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/apply-issues").length, 1);
+  assert.ok(document.textContent().includes("SPA-202"));
+  assert.ok(document.textContent().includes("打开 Issue"));
+  assert.ok(document.textContent().includes("复制 Issue ID"));
+
+  createButton.dispatchEvent({ type: "click", target: createButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/apply-issues").length, 2);
+  assert.ok(document.textContent().includes("SPA-201"));
+  assert.ok(document.textContent().includes("SPA-202"));
+  assert.ok(storage.getItem("multica-plusplus.workflow.v1").includes("issue-1"));
+});
+
+test("GUI loads and syncs issue subscriptions as one aggregate polling loop", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document } = createTinyDocument();
+  const fetchCalls = [];
+  const timers = [];
+
+  new Script(appSource).runInContext(createContext({
+    document,
+    window: { localStorage: createMemoryStorage() },
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/issue-subscriptions") {
+        return responseJson({
+          ok: true,
+          subscriptions: [
+            {
+              id: "sub-assist-goal",
+              kind: "assist_goal",
+              issueId: "assist-goal-1",
+              issueIdentifier: "SPA-10",
+              title: "Goal 澄清 Assist Issue",
+              state: "active",
+              lastKnownStatus: "todo",
+            },
+            {
+              id: "sub-assist-plan",
+              kind: "assist_plan_split",
+              issueId: "assist-plan-1",
+              issueIdentifier: "SPA-11",
+              title: "Plan 拆分 Assist Issue",
+              state: "active",
+              lastRunStatus: "running",
+            },
+            {
+              id: "sub-business",
+              kind: "business_issue",
+              issueId: "business-1",
+              issueIdentifier: "SPA-12",
+              title: "业务 Issue",
+              state: "active",
+              lastKnownStatus: "in_progress",
+              lastCommentExcerpt: "正在处理业务 Issue。",
+            },
+          ],
+        });
+      }
+      if (url === "/api/issue-subscriptions/sync") {
+        return responseJson({
+          ok: true,
+          synced: [
+            {
+              id: "sub-business",
+              kind: "business_issue",
+              issueId: "business-1",
+              issueIdentifier: "SPA-12",
+              title: "业务 Issue",
+              state: "active",
+              lastKnownStatus: "in_progress",
+              lastRunStatus: "running",
+              lastCommentExcerpt: "同步后的业务 Issue 摘要。",
+            },
+          ],
+          skipped: [],
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout: (fn, ms) => {
+      timers.push(ms);
+      return timers.length;
+    },
+    clearTimeout,
+    Date,
+  }));
+
+  await waitFor(() => document.textContent().includes("Issue 执行跟踪"));
+  assert.ok(document.textContent().includes("Assist Goal"));
+  assert.ok(document.textContent().includes("Assist Plan"));
+  assert.ok(document.textContent().includes("Business Issues"));
+  assert.ok(document.textContent().includes("SPA-12"));
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/issue-subscriptions").length, 1);
+  assert.equal(timers.includes(60000), true);
+});
+
+test("GUI restores Agent-assisted PlanSet after a browser refresh", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const storage = createMemoryStorage();
+  const first = createTinyDocument();
+  const fetchCalls = [];
+  const fetch = async (url, options = {}) => {
+    fetchCalls.push({ url, options });
+    if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+    if (url === "/api/goal/normalize") {
+      return responseJson({
+        ok: true,
+        goal: {
+          id: "goal-1",
+          status: "clarified",
+          title: "实现 Goal/Plan 拆分能力",
+          objective: "把模糊需求整理成 locked Goal 和多个 Plan。",
+          owner: "Codex",
+          source: "gui",
+          successCriteria: ["PlanSet can be generated"],
+          clarificationQuestions: [],
+        },
+      });
+    }
+    if (url === "/api/goal/lock") {
+      return responseJson({
+        ok: true,
+        goal: {
+          id: "goal-1",
+          status: "locked",
+          title: "实现 Goal/Plan 拆分能力",
+          objective: "把模糊需求整理成 locked Goal 和多个 Plan。",
+          owner: "Codex",
+          source: "gui",
+          successCriteria: ["PlanSet can be generated"],
+          clarificationQuestions: [],
+        },
+      });
+    }
+    if (url === "/api/assist/agents") {
+      return responseJson({
+        ok: true,
+        status: "available",
+        selectedAgent: { id: "agent-lead", name: "Claude-Lead", model: "pa/claude-opus", status: "idle", runtimeStatus: "online" },
+        agents: [{ id: "agent-lead", name: "Claude-Lead", model: "pa/claude-opus", status: "idle", runtimeStatus: "online" }],
+      });
+    }
+    if (url === "/api/plan/split") {
+      const body = JSON.parse(options.body);
+      return responseJson({
+        ok: true,
+        pending: true,
+        assist: {
+          agent: { id: "agent-lead", name: "Claude-Lead" },
+          issue: { id: "issue-plan", identifier: "SPA-100", status: "todo" },
+        },
+        assistChainId: body.assist.chainId,
+        assistRequestId: body.assist.requestId,
+      });
+    }
+    if (url === "/api/assist/result") {
+      return responseJson({
+        ok: true,
+        status: "completed",
+        diagnostic: { outputSource: "comments" },
+        assist: {
+          agent: { id: "agent-lead", name: "Claude-Lead" },
+          issue: { id: "issue-plan", identifier: "SPA-100", status: "todo" },
+          run: { id: "run-plan", status: "completed" },
+        },
+        planSet: {
+          id: "plan_set_1",
+          status: "draft",
+          splitMode: "parallel",
+          strategy: "llm-assisted-workstreams",
+          provider: { id: "provider-multica-agent", kind: "multica-agent", command: "multica", model: "pa/claude-opus", source: "multica-agent" },
+          assist: {
+            agent: { id: "agent-lead", name: "Claude-Lead" },
+            issue: { id: "issue-plan", identifier: "SPA-100", status: "todo" },
+            run: { id: "run-plan", status: "completed" },
+          },
+          plans: [
+            {
+              id: "subplan-1",
+              number: 1,
+              title: "刷新后保留的 Plan",
+              objective: "刷新页面后仍展示 PlanSet。",
+              workstream: { id: "persist", label: "Persist", reason: "Independent." },
+              suggestedAgent: "planner-agent",
+              dependencies: [],
+              steps: [{ number: 1, title: "保存草稿", status: "pending", dependencies: [] }],
+              acceptanceEvidence: "PlanSet visible after reload.",
+            },
+          ],
+          warnings: [],
+        },
+      });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  new Script(appSource).runInContext(createContext({
+    document: first.document,
+    window: { localStorage: storage },
+    fetch,
+    console,
+    setTimeout: (fn) => {
+      fn();
+      return 1;
+    },
+    clearTimeout,
+    Date,
+  }));
+  await waitFor(() => first.document.querySelector("[data-action='clarify-goal']"));
+
+  first.document.querySelector("[data-action='clarify-goal']").dispatchEvent({ type: "click", target: first.document.querySelector("[data-action='clarify-goal']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  first.document.querySelector("[data-action='lock-goal']").dispatchEvent({ type: "click", target: first.document.querySelector("[data-action='lock-goal']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  first.document.querySelector("[data-action='split-plan-llm']").dispatchEvent({ type: "click", target: first.document.querySelector("[data-action='split-plan-llm']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(first.document.textContent().includes("刷新后保留的 Plan"));
+
+  const second = createTinyDocument();
+  new Script(appSource).runInContext(createContext({
+    document: second.document,
+    window: { localStorage: storage },
+    fetch: async (url) => {
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      throw new Error(`unexpected fetch after refresh ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  }));
+  await waitFor(() => second.document.querySelector("[data-action='split-plan-llm']"));
+
+  assert.ok(second.document.textContent().includes("刷新后保留的 Plan"));
+  assert.ok(second.document.textContent().includes("并行 Plan"));
+  assert.ok(second.document.textContent().includes("SPA-100"));
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/split").length, 1);
+});
+
+test("GUI resumes a pending Assist Issue inbox after refresh without creating a new split task", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const storage = createMemoryStorage();
+  storage.setItem("multica-plusplus.workflow.v1", JSON.stringify({
+    version: 1,
+    language: "zh-CN",
+    goalRequest: "实现 Goal Plan 模块",
+    lockedGoal: {
+      id: "goal-1",
+      status: "locked",
+      title: "实现 Goal Plan 模块",
+      objective: "拆分为多个计划。",
+      successCriteria: ["PlanSet can be generated"],
+      constraints: ["preview-first"],
+      language: "zh-CN",
+    },
+    pendingAssist: {
+      kind: "planSet",
+      label: "Plan 拆分",
+      issueId: "issue-plan",
+      issueIdentifier: "SPA-100",
+      assistRequestId: "request-plan-refresh",
+      agent: { id: "agent-lead", name: "Claude-Lead" },
+      lockedGoal: {
+        id: "goal-1",
+        status: "locked",
+        title: "实现 Goal Plan 模块",
+        objective: "拆分为多个计划。",
+        successCriteria: ["PlanSet can be generated"],
+        constraints: ["preview-first"],
+        language: "zh-CN",
+      },
+      availableAgents: [{ id: "planner-agent", role: "planner" }],
+      language: "zh-CN",
+      timeoutMs: 300000,
+    },
+  }));
+  const { document } = createTinyDocument();
+  const fetchCalls = [];
+
+  new Script(appSource).runInContext(createContext({
+    document,
+    window: { localStorage: storage },
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/assist/result") {
+        const body = JSON.parse(options.body);
+        assert.equal(body.issueId, "issue-plan");
+        assert.equal(body.assistRequestId, "request-plan-refresh");
+        return responseJson({
+          ok: true,
+          status: "completed",
+          diagnostic: { outputSource: "comments" },
+          assist: {
+            agent: { id: "agent-lead", name: "Claude-Lead" },
+            issue: { id: "issue-plan", identifier: "SPA-100" },
+            run: { id: "run-plan", status: "completed" },
+          },
+          planSet: {
+            id: "plan_set_refresh",
+            status: "draft",
+            splitMode: "parallel",
+            strategy: "llm-assisted-workstreams",
+            provider: { id: "provider-multica-agent", kind: "multica-agent", command: "multica", source: "multica-agent" },
+            assist: {
+              agent: { id: "agent-lead", name: "Claude-Lead" },
+              issue: { id: "issue-plan", identifier: "SPA-100" },
+              run: { id: "run-plan", status: "completed" },
+            },
+            plans: [
+              {
+                id: "subplan-1",
+                number: 1,
+                title: "刷新后从收件箱恢复的 Plan",
+                objective: "刷新页面后从 Assist Issue comment 恢复 PlanSet。",
+                workstream: { id: "persist", label: "Persist", reason: "Independent." },
+                suggestedAgent: "planner-agent",
+                dependencies: [],
+                steps: [{ number: 1, title: "读取 comment", status: "pending", dependencies: [] }],
+                acceptanceEvidence: "PlanSet visible after reload.",
+              },
+            ],
+            warnings: [],
+          },
+        });
+      }
+      if (url === "/api/plan/split") throw new Error("refresh recovery must not create a new assist issue");
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout: (fn) => {
+      fn();
+      return 1;
+    },
+    clearTimeout,
+    Date,
+  }));
+
+  await waitFor(() => document.textContent().includes("刷新后从收件箱恢复的 Plan"));
+  assert.ok(document.textContent().includes("刷新后从收件箱恢复的 Plan"));
+  assert.ok(document.textContent().includes("SPA-100"));
+  assert.equal(fetchCalls.some((call) => call.url === "/api/plan/split"), false);
+  assert.ok(fetchCalls.some((call) => call.url === "/api/assist/result"));
 });
 
 test("GUI creates a team preset and refreshes the preset list", async () => {
@@ -773,6 +1358,21 @@ function responseJson(value) {
   };
 }
 
+function createMemoryStorage() {
+  const data = new Map();
+  return {
+    getItem(key) {
+      return data.has(key) ? data.get(key) : null;
+    },
+    setItem(key, value) {
+      data.set(String(key), String(value));
+    },
+    removeItem(key) {
+      data.delete(String(key));
+    },
+  };
+}
+
 async function waitFor(fn) {
   for (let index = 0; index < 20; index += 1) {
     const value = fn();
@@ -794,6 +1394,15 @@ function createTinyDocument() {
       if (type === "click") clickHandlers.push(handler);
     },
     querySelector(selector) {
+      if (selector.startsWith("[data-action='") && selector.includes("'][data-issue-preview-id='")) {
+        const match = selector.match(/^\[data-action='([^']+)'\]\[data-issue-preview-id='([^']+)'\]$/);
+        if (match) {
+          return findNodeByAttributes(document.body, {
+            "data-action": match[1],
+            "data-issue-preview-id": match[2],
+          });
+        }
+      }
       if (selector.startsWith("[data-agent-preset-id='")) {
         const id = selector.slice("[data-agent-preset-id='".length, -2);
         return findNodeByAttribute(document.body, "data-agent-preset-id", id);
@@ -961,6 +1570,7 @@ function createTinyDocument() {
       closest(selector) {
         if (selector === "[data-action]" && attributes.has("data-action")) return this;
         if (selector === "[data-agent-preset]" && attributes.has("data-agent-preset")) return this;
+        if (selector === "[data-issue-preview-id]" && attributes.has("data-issue-preview-id")) return this;
         if (selector === "[data-nav-target]" && attributes.has("data-nav-target")) return this;
         return null;
       },
@@ -989,6 +1599,16 @@ function findNodeByAttribute(root, name, value) {
   if (root.getAttribute?.(name) === value) return root;
   for (const child of root.children ?? []) {
     const match = findNodeByAttribute(child, name, value);
+    if (match) return match;
+  }
+  return null;
+}
+
+function findNodeByAttributes(root, expected) {
+  if (!root) return null;
+  if (Object.entries(expected).every(([name, value]) => root.getAttribute?.(name) === value)) return root;
+  for (const child of root.children ?? []) {
+    const match = findNodeByAttributes(child, expected);
     if (match) return match;
   }
   return null;

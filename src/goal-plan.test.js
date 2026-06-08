@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import {
+  applyIssueSplit,
   generatePlanFromGoal,
   lockGoalDraft,
   normalizeGoal,
@@ -313,6 +314,111 @@ test("previews one Multica issue candidate per LLM sub-plan", async () => {
   assert.ok(issueSplit.issues.every((issue) => issue.metadata.plan_set_id === planSet.id));
   assert.ok(issueSplit.issues.every((issue, index) => issue.metadata.subplan_id === planSet.plans[index].id));
   assert.ok(issueSplit.operations.every((operation) => operation.displayCommand.includes("multica issue create")));
+});
+
+test("PlanSet issue preview carries sub-plan execution context into each business issue", async () => {
+  const goal = lockGoalDraft({
+    ...normalizeGoal({
+      request: "搭建一个能够自动监听 GitHub 项目的审查器，在 push 和 PR 发生后自动触发审查。",
+    }),
+    risks: ["GitHub webhook 事件可能重复投递", "审查结果回写失败不能静默丢失"],
+    constraints: ["未经人工确认，不得修改权限或 schema"],
+  });
+  const planSet = await splitGoalIntoPlansWithLlm({
+    goal,
+    provider: { id: "provider-codex", kind: "codex", command: "codex", source: "codex" },
+    invokeLlm: async () => ({ ok: true, planSetDraft: sampleLlmPlanDraft() }),
+  });
+
+  const issueSplit = previewIssueSplitFromPlanSet({ goal, planSet, projectId: "project-1" });
+  const firstPlan = planSet.plans[0];
+  const firstIssue = issueSplit.issues[0];
+
+  assert.match(firstIssue.description, new RegExp(firstPlan.objective));
+  assert.match(firstIssue.description, new RegExp(firstPlan.workstream.label));
+  assert.match(firstIssue.description, new RegExp(firstPlan.suggestedAgent));
+  assert.match(firstIssue.description, new RegExp(firstPlan.steps[0].title));
+  assert.match(firstIssue.description, new RegExp(firstPlan.steps[0].acceptanceEvidence));
+  assert.match(firstIssue.description, new RegExp(firstPlan.acceptanceEvidence));
+  assert.match(firstIssue.description, /未经人工确认，不得修改权限、技能、schema 或 metadata/);
+  assert.equal(firstIssue.operationSummary.type, "issue:create");
+  assert.ok(firstIssue.operationSummary.displayCommand.includes("multica issue create"));
+});
+
+test("applyIssueSplit can create one candidate and skip already-created candidates in batch", async () => {
+  const issueSplit = {
+    id: "issue_split_single_candidate",
+    mode: "plan_set",
+    confirmationRequired: true,
+    confirmationToken: "APPLY-MULTICA-ISSUE-SPLIT",
+    issues: [
+      {
+        id: "issue-preview-1",
+        title: "Issue one",
+        description: "description one",
+        priority: "medium",
+        metadata: { goal_id: "goal-1", split_mode: "plan_set" },
+      },
+      {
+        id: "issue-preview-2",
+        title: "Issue two",
+        description: "description two",
+        priority: "medium",
+        metadata: { goal_id: "goal-1", split_mode: "plan_set" },
+      },
+    ],
+  };
+  const calls = [];
+  const exec = async (args) => {
+    calls.push(args);
+    if (args[0] === "issue" && args[1] === "create") {
+      return {
+        code: 0,
+        stderr: "",
+        stdout: JSON.stringify({
+          id: `created-${args[args.indexOf("--title") + 1].endsWith("one") ? "1" : "2"}`,
+          identifier: `SPA-${args[args.indexOf("--title") + 1].endsWith("one") ? "101" : "102"}`,
+          title: args[args.indexOf("--title") + 1],
+        }),
+      };
+    }
+    if (args[0] === "issue" && args[1] === "metadata" && args[2] === "set") {
+      return { code: 0, stdout: JSON.stringify({ ok: true }), stderr: "" };
+    }
+    throw new Error(`unexpected ${args.join(" ")}`);
+  };
+  const writeDescriptionFile = async (_issue, index) => `C:\\tmp\\issue-${index + 1}.md`;
+
+  const single = await applyIssueSplit({
+    issueSplit,
+    issuePreviewId: "issue-preview-2",
+    execute: true,
+    confirm: "APPLY-MULTICA-ISSUE-SPLIT",
+    exec,
+    writeDescriptionFile,
+  });
+
+  assert.equal(single.ok, true);
+  assert.deepEqual(single.createdIssues.map((issue) => issue.issuePreviewId), ["issue-preview-2"]);
+  assert.equal(calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
+
+  const batch = await applyIssueSplit({
+    issueSplit: {
+      ...issueSplit,
+      issues: [
+        { ...issueSplit.issues[0], createdIssue: { id: "created-1", identifier: "SPA-101" } },
+        issueSplit.issues[1],
+      ],
+    },
+    execute: true,
+    confirm: "APPLY-MULTICA-ISSUE-SPLIT",
+    exec,
+    writeDescriptionFile,
+  });
+
+  assert.equal(batch.ok, true);
+  assert.deepEqual(batch.createdIssues.map((issue) => issue.issuePreviewId), ["issue-preview-2"]);
+  assert.ok(batch.operations.some((operation) => operation.status === "skipped"));
 });
 
 test("previews no issue, single issue, and multi issue split without creating issues", () => {
