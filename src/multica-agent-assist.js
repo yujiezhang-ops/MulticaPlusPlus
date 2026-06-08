@@ -12,12 +12,17 @@ import {
 const DEFAULT_COMMAND_TIMEOUT_MS = 30000;
 const DEFAULT_RUN_TIMEOUT_MS = 300000;
 const DEFAULT_POLL_INTERVAL_MS = 3000;
+const DEFAULT_DISCOVERY_RETRIES = 1;
+const DEFAULT_DISCOVERY_RETRY_DELAY_MS = 500;
 const SECRET_KEY_PATTERN = /token|secret|password|api[_-]?key|cookie|credential/i;
 
 export async function discoverAssistAgents({
   cliPath = "multica",
   exec,
   commandTimeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
+  discoveryRetries = DEFAULT_DISCOVERY_RETRIES,
+  retryDelayMs = DEFAULT_DISCOVERY_RETRY_DELAY_MS,
+  sleep = defaultSleep,
 } = {}) {
   const run = exec ?? createMulticaExec({ cliPath, timeoutMs: commandTimeoutMs });
   const diagnostics = {};
@@ -28,7 +33,11 @@ export async function discoverAssistAgents({
   const daemonStatus = daemon.code === 0 ? parseDaemonStatus(daemon.stdout) : { status: "unknown" };
   if (daemon.code !== 0) warnings.push("daemon_status_unavailable");
 
-  const runtimeResult = await runJsonCommand(run, ["runtime", "list", "--output", "json"]);
+  const runtimeResult = await runRetriedJsonCommand(run, ["runtime", "list", "--output", "json"], {
+    retries: discoveryRetries,
+    retryDelayMs,
+    sleep,
+  });
   diagnostics.runtimeList = summarizeCommandResult(runtimeResult);
   const runtimes = runtimeResult.ok
     ? extractCollection(runtimeResult.data, ["runtimes", "items", "data"]).map(sanitizeRuntime)
@@ -36,7 +45,11 @@ export async function discoverAssistAgents({
   if (!runtimeResult.ok) warnings.push("runtime_list_unavailable");
   const runtimeById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
 
-  const agentResult = await runJsonCommand(run, ["agent", "list", "--output", "json"]);
+  const agentResult = await runRetriedJsonCommand(run, ["agent", "list", "--output", "json"], {
+    retries: discoveryRetries,
+    retryDelayMs,
+    sleep,
+  });
   diagnostics.agentList = summarizeCommandResult(agentResult);
   if (!agentResult.ok) {
     return {
@@ -192,6 +205,49 @@ export async function invokeMulticaAgentForPlanSplit({
   };
 }
 
+export async function startMulticaAgentForGoalClarification({
+  agent,
+  request = "",
+  context = {},
+  language = context?.language,
+  assistChainId = "",
+  assistRequestId = "",
+  cliPath = "multica",
+  exec,
+} = {}) {
+  return startMulticaAgentAssist({
+    agent,
+    cliPath,
+    exec,
+    title: buildAssistIssueTitle({ kind: "goal", assistChainId }),
+    prompt: buildGoalClarificationPrompt({ request, context, language, assistChainId, assistRequestId }),
+    assistChainId,
+    assistRequestId,
+  });
+}
+
+export async function startMulticaAgentForPlanSplit({
+  agent,
+  goal,
+  constraints = [],
+  availableAgents = [],
+  language = goal?.language,
+  assistChainId = "",
+  assistRequestId = "",
+  cliPath = "multica",
+  exec,
+} = {}) {
+  return startMulticaAgentAssist({
+    agent,
+    cliPath,
+    exec,
+    title: buildAssistIssueTitle({ kind: "planSet", assistChainId }),
+    prompt: buildGoalPlanSplitPrompt({ goal, constraints, availableAgents, language, assistChainId, assistRequestId }),
+    assistChainId,
+    assistRequestId,
+  });
+}
+
 export function parseAgentJsonResponse(rawText) {
   const text = String(rawText ?? "").trim();
   if (!text) {
@@ -231,6 +287,214 @@ export function providerFromAssistAgent(agent = {}) {
   });
 }
 
+export async function checkMulticaAgentAssistResult({
+  kind = "goal",
+  issueId = "",
+  assistRequestId = "",
+  agent,
+  cliPath = "multica",
+  exec,
+} = {}) {
+  if (!issueId) {
+    return { ok: false, blocked: true, reason: "multica_assist_issue_missing", diagnostic: {} };
+  }
+  const run = exec ?? createMulticaExec({ cliPath, timeoutMs: DEFAULT_COMMAND_TIMEOUT_MS });
+  const runsResult = await runJsonCommand(run, ["issue", "runs", issueId, "--output", "json"]);
+  const diagnostic = { issue: { id: String(issueId) }, outputSource: "" };
+  if (!runsResult.ok) {
+    return blockedResult(classifyMulticaCommandFailure(runsResult), {
+      ...diagnostic,
+      runs: summarizeCommandResult(runsResult),
+    });
+  }
+
+  const runs = extractCollection(runsResult.data, ["runs", "items", "data"]).map(sanitizeRun);
+  const latest = selectLatestRun(runs);
+  diagnostic.runCount = runs.length;
+  if (!latest || !["completed", "done", "failed", "error", "cancelled", "canceled"].includes(latest.status)) {
+    return {
+      ok: true,
+      pending: true,
+      status: "pending",
+      assist: stripEmpty({
+        agent: agent ? sanitizeAssistAgent(agent) : undefined,
+        issue: { id: String(issueId) },
+        run: sanitizeRunForSummary(latest),
+      }),
+      diagnostic: redactObject(diagnostic),
+    };
+  }
+  diagnostic.run = sanitizeRunForSummary(latest);
+
+  if (["failed", "error"].includes(latest.status)) {
+    return blockedResult("multica_agent_run_failed", diagnostic);
+  }
+  if (["cancelled", "canceled"].includes(latest.status)) {
+    return blockedResult("multica_agent_run_cancelled", diagnostic);
+  }
+
+  const candidate = await findAgentJsonOutput({ run, issueId, latest, kind, assistRequestId });
+  diagnostic.outputSource = candidate.source;
+  if (!candidate.ok) {
+    return blockedResult("multica_agent_json_not_found", diagnostic);
+  }
+
+  try {
+    const parsed = kind === "planSet"
+      ? { planSetDraft: parseLlmPlanSetResponse(JSON.stringify(candidate.data)) }
+      : { goalDraft: parseLlmGoalClarificationResponse(JSON.stringify(candidate.data)) };
+    return {
+      ok: true,
+      status: "completed",
+      ...parsed,
+      assist: stripEmpty({
+        agent: agent ? sanitizeAssistAgent(agent) : undefined,
+        issue: { id: String(issueId) },
+        run: sanitizeRunForSummary(latest),
+      }),
+      diagnostic: redactObject(diagnostic),
+    };
+  } catch (error) {
+    return blockedResult(error.code === "agent_non_json_output" ? "multica_agent_non_json_output" : "multica_agent_invalid_json", {
+      ...diagnostic,
+      parseError: error.message,
+    });
+  }
+}
+
+async function startMulticaAgentAssist({
+  agent,
+  cliPath,
+  exec,
+  title,
+  prompt,
+  assistChainId = "",
+  assistRequestId = "",
+}) {
+  if (!agent?.id) {
+    return { ok: false, blocked: true, reason: "assist_agent_required", diagnostic: {} };
+  }
+
+  const run = exec ?? createMulticaExec({ cliPath, timeoutMs: DEFAULT_COMMAND_TIMEOUT_MS });
+  const tempDir = await mkdtemp(join(tmpdir(), "multica-agent-assist-"));
+  const promptFile = join(tempDir, "prompt.md");
+  const diagnostic = {
+    agent: sanitizeAssistAgent(agent),
+    issue: null,
+  };
+
+  try {
+    await writeFile(promptFile, prompt, "utf8");
+    const issueResult = assistChainId
+      ? await upsertAssistInboxIssue({ run, title, promptFile, agent })
+      : await createAssistIssue({ run, title, promptFile, agent });
+    Object.assign(diagnostic, issueResult.diagnostic);
+    if (!issueResult.ok) {
+      return blockedResult(issueResult.reason, diagnostic);
+    }
+
+    const issue = issueResult.issue;
+    diagnostic.issue = issue;
+    if (!issue.id) {
+      return blockedResult("multica_assist_issue_missing", diagnostic);
+    }
+    const subscriberResult = await runJsonCommand(run, ["issue", "subscriber", "add", issue.id, "--output", "json"]);
+    diagnostic.subscriber = summarizeCommandResult(subscriberResult);
+
+    return {
+      ok: true,
+      pending: true,
+      status: "pending",
+      provider: providerFromAssistAgent(agent),
+      assist: {
+        agent: sanitizeAssistAgent(agent),
+        issue,
+      },
+      assistChainId,
+      assistRequestId,
+      diagnostic: redactObject(diagnostic),
+      warnings: subscriberResult.ok ? [] : ["assist_issue_subscribe_unavailable"],
+    };
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function createAssistIssue({ run, title, promptFile, agent }) {
+  const createArgs = [
+    "issue",
+    "create",
+    "--title",
+    title,
+    "--description-file",
+    promptFile,
+    "--assignee-id",
+    agent.id,
+    "--allow-duplicate",
+    "--priority",
+    "low",
+    "--output",
+    "json",
+  ];
+  const createResult = await runJsonCommand(run, createArgs);
+  const diagnostic = { create: summarizeCommandResult(createResult) };
+  if (!createResult.ok) {
+    return { ok: false, reason: classifyMulticaCommandFailure(createResult), diagnostic };
+  }
+  return { ok: true, issue: sanitizeIssue(createResult.data), diagnostic };
+}
+
+async function upsertAssistInboxIssue({ run, title, promptFile, agent }) {
+  const found = await findAssistInboxIssue({ run, title });
+  if (!found.ok) {
+    return createAssistIssue({ run, title, promptFile, agent });
+  }
+
+  const updateResult = await runJsonCommand(run, [
+    "issue",
+    "update",
+    found.issue.id,
+    "--title",
+    title,
+    "--description-file",
+    promptFile,
+    "--assignee-id",
+    agent.id,
+    "--priority",
+    "low",
+    "--output",
+    "json",
+  ]);
+  const rerunResult = updateResult.ok
+    ? await runJsonCommand(run, ["issue", "rerun", found.issue.id, "--output", "json"])
+    : null;
+  const diagnostic = {
+    search: found.diagnostic?.search,
+    update: summarizeCommandResult(updateResult),
+    rerun: rerunResult ? summarizeCommandResult(rerunResult) : undefined,
+  };
+  if (!updateResult.ok) {
+    return { ok: false, reason: classifyMulticaCommandFailure(updateResult), diagnostic };
+  }
+  if (!rerunResult?.ok) {
+    return { ok: false, reason: classifyMulticaCommandFailure(rerunResult ?? {}), diagnostic };
+  }
+  return {
+    ok: true,
+    issue: sanitizeIssue({ ...found.issue, ...updateResult.data }),
+    diagnostic,
+  };
+}
+
+async function findAssistInboxIssue({ run, title }) {
+  const result = await runJsonCommand(run, ["issue", "search", title, "--limit", "5", "--include-closed", "--output", "json"]);
+  const diagnostic = { search: summarizeCommandResult(result) };
+  if (!result.ok) return { ok: false, diagnostic };
+  const issues = extractCollection(result.data, ["issues", "items", "data"]).map(sanitizeIssue);
+  const issue = issues.find((item) => item.title === title) || null;
+  return issue?.id ? { ok: true, issue, diagnostic } : { ok: false, diagnostic };
+}
+
 async function invokeMulticaAgent({
   agent,
   cliPath,
@@ -266,6 +530,7 @@ async function invokeMulticaAgent({
       promptFile,
       "--assignee-id",
       agent.id,
+      "--allow-duplicate",
       "--priority",
       "low",
       "--output",
@@ -384,6 +649,63 @@ async function readRunMessagesOutput({ run, issueId, taskId }) {
   )).filter(Boolean).join("\n");
 }
 
+async function findAgentJsonOutput({ run, issueId, latest, assistRequestId = "" }) {
+  const direct = parseAgentJsonCandidate(latest.output, assistRequestId);
+  if (direct.ok) return { ...direct, source: "output" };
+  const directFallback = parseAgentJsonCandidate(latest.output);
+  if (directFallback.ok && !assistRequestId) return { ...directFallback, source: "output" };
+
+  const messagesText = await readRunMessagesOutput({ run, issueId, taskId: latest.id });
+  const messages = parseAgentJsonCandidate(messagesText, assistRequestId);
+  if (messages.ok) return { ...messages, source: "messages" };
+  const messagesFallback = parseAgentJsonCandidate(messagesText);
+  if (messagesFallback.ok && !assistRequestId) return { ...messagesFallback, source: "messages" };
+
+  const commentsPayload = await readIssueCommentsOutput({ run, issueId, since: latest.startedAt || latest.createdAt });
+  const comments = parseAgentJsonCandidate(commentsPayload.text, assistRequestId);
+  if (comments.ok) return { ...comments, source: "comments" };
+  const commentsFallback = parseAgentJsonCandidate(commentsPayload.text);
+  if (commentsFallback.ok && (!assistRequestId || commentsPayload.scoped)) {
+    return { ...commentsFallback, source: "comments" };
+  }
+
+  return { ok: false, source: "" };
+}
+
+async function readIssueCommentsOutput({ run, issueId, since = "" }) {
+  const args = ["issue", "comment", "list", issueId, "--output", "json"];
+  if (since) args.push("--since", since);
+  let result = await runJsonCommand(run, args);
+  let scoped = Boolean(since);
+  if (!result.ok && since) {
+    result = await runJsonCommand(run, ["issue", "comment", "list", issueId, "--output", "json"]);
+    scoped = false;
+  }
+  if (!result.ok) return { text: "", scoped: false };
+  const comments = extractCollection(result.data, ["comments", "items", "data"]);
+  return {
+    text: comments.map((comment) => (
+      comment?.content
+      ?? comment?.text
+      ?? comment?.message
+      ?? ""
+    )).filter(Boolean).join("\n"),
+    scoped,
+  };
+}
+
+function parseAgentJsonCandidate(rawText, assistRequestId = "") {
+  try {
+    const data = parseAgentJsonResponse(rawText);
+    if (assistRequestId && data?.assistRequestId && data.assistRequestId !== assistRequestId) {
+      return { ok: false };
+    }
+    return { ok: true, data };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function rankAssistAgents(agents) {
   return agents
     .map((agent) => ({ ...agent, score: scoreAssistAgent(agent) }))
@@ -466,6 +788,21 @@ function sanitizeRun(run = {}) {
   });
 }
 
+function sanitizeRunForSummary(run = {}) {
+  return stripEmpty({
+    id: String(run.id ?? ""),
+    status: String(run.status ?? ""),
+    agentId: String(run.agentId ?? run.agent_id ?? ""),
+    runtimeId: String(run.runtimeId ?? run.runtime_id ?? ""),
+    kind: String(run.kind ?? ""),
+    attempt: run.attempt ?? "",
+    createdAt: String(run.createdAt ?? run.created_at ?? ""),
+    startedAt: String(run.startedAt ?? run.started_at ?? ""),
+    completedAt: String(run.completedAt ?? run.completed_at ?? ""),
+    error: truncate(redactText(run.error ?? ""), 280),
+  });
+}
+
 function selectLatestRun(runs) {
   if (!runs.length) return null;
   return runs.slice().sort((left, right) => {
@@ -510,6 +847,28 @@ async function runJsonCommand(exec, args) {
   }
 }
 
+async function runRetriedJsonCommand(exec, args, { retries, retryDelayMs, sleep }) {
+  const attempts = [];
+  const maxAttempts = Math.max(1, Number(retries ?? 0) + 1);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = await runJsonCommand(exec, args);
+    attempts.push(result);
+    if (result.ok || !isRetryableMulticaResult(result) || attempt >= maxAttempts) {
+      if (attempts.length <= 1) return result;
+      return {
+        ...result,
+        attempts: attempts.map(summarizeCommandResult),
+      };
+    }
+    await sleep(Math.max(0, Number(retryDelayMs ?? 0)));
+  }
+  return attempts.at(-1) ?? { ok: false, code: 1, stdout: "", stderr: "retry failed", args };
+}
+
+function isRetryableMulticaResult(result) {
+  return classifyMulticaCommandFailure(result) === "multica_api_network_failed";
+}
+
 function createMulticaExec({ cliPath = "multica", timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS } = {}) {
   return (args) => new Promise((resolve, reject) => {
     const command = cliPath.endsWith(".js") || cliPath.endsWith(".mjs") ? process.execPath : cliPath;
@@ -539,18 +898,22 @@ function createMulticaExec({ cliPath = "multica", timeoutMs = DEFAULT_COMMAND_TI
   });
 }
 
-function buildGoalClarificationPrompt({ request, context, language }) {
+function buildGoalClarificationPrompt({ request, context, language, assistChainId = "", assistRequestId = "" }) {
   const normalizedLanguage = normalizeLanguage(language);
   return [
     "You are a Multica Agent assisting Multica++ with Goal clarification.",
     "This assist issue is a real Multica task, but your output must be analysis only.",
     "Do not modify files, run write commands, create issues, update metadata, or change permissions.",
     "Return JSON only; no Markdown or prose outside JSON.",
+    "Final JSON must be written directly to the final output; if you also use an issue comment, that comment must contain only the same JSON object.",
     "",
     ...buildLanguageContract(normalizedLanguage),
     "",
     "Raw user request:",
     String(request ?? ""),
+    "",
+    "Assist inbox identifiers:",
+    JSON.stringify(stripEmpty({ assistChainId, assistRequestId }), null, 2),
     "",
     "Context JSON:",
     JSON.stringify(context ?? {}, null, 2),
@@ -561,6 +924,7 @@ function buildGoalClarificationPrompt({ request, context, language }) {
     "- If actionable, set status to clarified and provide success criteria, scope, constraints, risks, and any remaining questions.",
     "- Do not expose, request, infer, copy, or log secrets.",
     "- Do not change public schema, permission boundaries, skills, metadata, or collaboration roles.",
+    "- Include the exact assistRequestId value in the top-level JSON when provided; this lets Multica++ ignore stale inbox comments.",
     "",
     "Output JSON shape:",
     JSON.stringify({
@@ -573,22 +937,27 @@ function buildGoalClarificationPrompt({ request, context, language }) {
       risks: ["string"],
       clarificationQuestions: ["string"],
       confidence: "medium",
+      assistRequestId: assistRequestId || "string",
     }, null, 2),
   ].join("\n");
 }
 
-function buildGoalPlanSplitPrompt({ goal, constraints, availableAgents, language }) {
+function buildGoalPlanSplitPrompt({ goal, constraints, availableAgents, language, assistChainId = "", assistRequestId = "" }) {
   const normalizedLanguage = normalizeLanguage(language);
   return [
     "You are a Multica Agent assisting Multica++ with splitting one locked Goal into multiple parallel Plan drafts.",
     "This assist issue is a real Multica task, but your output must be analysis only.",
     "Do not modify files, run write commands, create issues, update metadata, or change permissions.",
     "Return JSON only; no Markdown or prose outside JSON.",
+    "Final JSON must be written directly to the final output; if you also use an issue comment, that comment must contain only the same JSON object.",
     "",
     ...buildLanguageContract(normalizedLanguage),
     "",
     "Locked Goal JSON:",
     JSON.stringify(goal ?? {}, null, 2),
+    "",
+    "Assist inbox identifiers:",
+    JSON.stringify(stripEmpty({ assistChainId, assistRequestId }), null, 2),
     "",
     "Available agents JSON:",
     JSON.stringify(availableAgents ?? [], null, 2),
@@ -599,6 +968,7 @@ function buildGoalPlanSplitPrompt({ goal, constraints, availableAgents, language
     "- do not change public schema, permission boundaries, skills, metadata, or collaboration roles.",
     "- do not expose, request, infer, copy, or log secrets.",
     "- split into independent workstreams suitable for parallel review.",
+    "- Include the exact assistRequestId value in the top-level JSON when provided; this lets Multica++ ignore stale inbox comments.",
     ...(Array.isArray(constraints) ? constraints.map((item) => `- ${item}`) : []),
     "",
     "Output JSON shape:",
@@ -623,8 +993,22 @@ function buildGoalPlanSplitPrompt({ goal, constraints, availableAgents, language
       ],
       risks: ["string"],
       questions: ["string"],
+      assistRequestId: assistRequestId || "string",
     }, null, 2),
   ].join("\n");
+}
+
+function buildAssistIssueTitle({ kind, assistChainId }) {
+  const stable = String(assistChainId || "").trim();
+  if (!stable) {
+    return kind === "planSet"
+      ? "Multica++ Assist · Goal to Plan split"
+      : "Multica++ Assist · Goal clarification";
+  }
+  const suffix = stable.replace(/[^\w.-]+/g, "-").slice(0, 64);
+  return kind === "planSet"
+    ? `Multica++ Assist Inbox · PlanSet · ${suffix}`
+    : `Multica++ Assist Inbox · Goal · ${suffix}`;
 }
 
 function normalizeLanguage(language) {
@@ -666,8 +1050,19 @@ function classifyMulticaCommandFailure(result = {}) {
   const text = `${result.stderr ?? ""}\n${result.stdout ?? ""}`.toLowerCase();
   if (result.code === 124 || text.includes("timed out") || text.includes("timeout")) return "multica_agent_timeout";
   if (text.includes("not recognized") || text.includes("not found") || text.includes("enoent")) return "multica_cli_not_found";
+  if (text.includes("duplicate") || text.includes("already exists")) return "multica_issue_duplicate_blocked";
   if (text.includes("auth") || text.includes("login") || text.includes("unauthorized") || text.includes("forbidden")) return "multica_auth_required";
   if (text.includes("daemon") && (text.includes("not running") || text.includes("unavailable"))) return "multica_daemon_unavailable";
+  if (
+    text.includes("api.multica.ai")
+    || text.includes("eof")
+    || text.includes("connection reset")
+    || text.includes("tls handshake")
+    || text.includes("dns")
+    || text.includes("no such host")
+    || text.includes("proxyconnect")
+    || text.includes("i/o timeout")
+  ) return "multica_api_network_failed";
   return "multica_cli_failed";
 }
 
@@ -690,6 +1085,7 @@ function summarizeCommandResult(result = {}) {
     stdoutExcerpt: isJsonList ? "__json_output_omitted__" : truncate(redactText(result.stdout ?? ""), 220),
     stderrExcerpt: truncate(redactText(result.stderr ?? ""), 220),
     argvSummary: Array.isArray(result.args) ? result.args.map((arg) => (String(arg).includes("\\") ? "__PATH__" : String(arg))) : undefined,
+    attempts: Array.isArray(result.attempts) ? result.attempts : undefined,
   });
 }
 

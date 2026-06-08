@@ -1,6 +1,10 @@
 (function () {
   "use strict";
 
+  const WORKFLOW_STORAGE_KEY = "multica-plusplus.workflow.v1";
+  const ASSIST_POLL_INTERVAL_MS = 60000;
+  let assistSubscription = null;
+
   const mockData = {
     project: "MulticaPlusPlus",
     agent: "planner-agent",
@@ -262,8 +266,13 @@
     lockedGoal: null,
     generatedPlan: null,
     planSet: null,
+    pendingAssist: null,
     llmProviders: null,
     issueSplit: null,
+    issueApplyConfirm: "",
+    issueApplyStatus: "idle",
+    issueApplyResult: null,
+    issueApplyError: "",
     goalPlanStatus: "草稿",
     goalPlanFeedback: "先澄清并锁定 Goal；锁定后生成 Plan；Issue 只是 Plan 后的拆分预览。",
     goalPlanComplexity: "medium",
@@ -276,6 +285,8 @@
     agentConfigFeedback: "预览只发生在浏览器本地。真实 Multica 写入必须通过 CLI 并携带明确确认 token。",
     records: mockData.records.slice()
   };
+
+  restoreWorkflowDraft();
 
   const viewIds = {
     control: "view-control",
@@ -318,6 +329,114 @@
     return mockData.presetLibrary.find((preset) => preset.id === state.selectedPresetId) || mockData.presetLibrary[0];
   }
 
+  function restoreWorkflowDraft() {
+    const storage = browserStorage();
+    if (!storage) return;
+    try {
+      const raw = storage.getItem(WORKFLOW_STORAGE_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (!draft || typeof draft !== "object" || draft.version !== 1) return;
+      [
+        "language",
+        "goalRequest",
+        "normalizedGoal",
+        "lockedGoal",
+        "generatedPlan",
+        "planSet",
+        "pendingAssist",
+        "issueSplit",
+        "issueApplyStatus",
+        "issueApplyResult",
+        "issueApplyError",
+        "goalPlanStatus",
+        "goalPlanFeedback",
+        "goalPlanComplexity",
+      ].forEach((field) => {
+        if (Object.prototype.hasOwnProperty.call(draft, field)) {
+          state[field] = draft[field];
+        }
+      });
+      if (draft.lastAssist) {
+        mockData.llmAssist.lastAssist = draft.lastAssist;
+      }
+    } catch {
+      storage.removeItem(WORKFLOW_STORAGE_KEY);
+    }
+  }
+
+  function persistWorkflowDraft() {
+    const storage = browserStorage();
+    if (!storage) return;
+    try {
+      storage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify({
+        version: 1,
+        savedAt: new Date().toISOString(),
+        language: state.language,
+        goalRequest: state.goalRequest,
+        normalizedGoal: state.normalizedGoal,
+        lockedGoal: state.lockedGoal,
+        generatedPlan: state.generatedPlan,
+        planSet: state.planSet,
+        pendingAssist: state.pendingAssist,
+        issueSplit: state.issueSplit,
+        issueApplyStatus: state.issueApplyStatus,
+        issueApplyResult: state.issueApplyResult,
+        issueApplyError: state.issueApplyError,
+        goalPlanStatus: state.goalPlanStatus,
+        goalPlanFeedback: state.goalPlanFeedback,
+        goalPlanComplexity: state.goalPlanComplexity,
+        lastAssist: mockData.llmAssist.lastAssist || null,
+      }));
+    } catch {
+      // localStorage can be unavailable in hardened browsers or file mode.
+    }
+  }
+
+  function browserStorage() {
+    try {
+      return window?.localStorage || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function stableHash(value) {
+    const input = String(value || "");
+    let hash = 2166136261;
+    for (let index = 0; index < input.length; index += 1) {
+      hash ^= input.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
+
+  function nextAssistRequestId(kind) {
+    return `request_${kind}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function assistChainId(kind, seed) {
+    return `assist_${kind}_${stableHash(seed || kind)}`;
+  }
+
+  function stopAssistSubscription() {
+    if (!assistSubscription) return;
+    if (assistSubscription.eventSource) {
+      assistSubscription.eventSource.close();
+    }
+    if (assistSubscription.timer) {
+      clearTimeout(assistSubscription.timer);
+    }
+    assistSubscription = null;
+  }
+
+  function encodeQuery(params) {
+    return Object.entries(params)
+      .filter(([, value]) => value !== undefined && value !== null && value !== "")
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+      .join("&");
+  }
+
   function statusLabel(status) {
     const labels = {
       done: "已完成",
@@ -340,6 +459,12 @@
       Failed: "失败"
     };
     return labels[status] || status;
+  }
+
+  function compactText(value, maxLength = 160) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}...`;
   }
 
   function setPressed() {
@@ -485,7 +610,7 @@
       },
       {
         label: "Issue",
-        status: state.issueSplit ? "已预览" : "待预览",
+        status: state.issueApplyResult?.createdIssues?.length ? "已创建" : state.issueSplit ? "已预览" : "待预览",
         done: Boolean(state.issueSplit),
       },
     ].forEach((item) => {
@@ -503,15 +628,76 @@
     previewCard.appendChild(el("h3", "", "Plan 到 Issue 预览"));
     previewCard.appendChild(el("p", "", state.issueSplit.summary));
     if (state.issueSplit.issues?.length) {
-      const list = el("ul", "issue-preview-list");
-      state.issueSplit.issues.forEach((issue) => {
-        list.appendChild(el("li", "", `${issue.title} · ${issue.priority || "medium"}`));
+      const list = el("div", "issue-preview-list");
+      state.issueSplit.issues.forEach((issue, index) => {
+        const item = el("article", "issue-preview-item");
+        const itemHeader = el("div", "split-header");
+        itemHeader.appendChild(el("h4", "", issue.title));
+        itemHeader.appendChild(el("span", "config-status", issue.priority || "medium"));
+        item.appendChild(itemHeader);
+        const description = compactText(issue.description || "", 150);
+        if (description) {
+          item.appendChild(el("p", "issue-description-preview", description));
+        }
+        const operation = state.issueSplit.operations?.[index];
+        if (issue.metadata && Object.keys(issue.metadata).length) {
+          const metadata = el("dl", "config-definition issue-metadata");
+          Object.entries(issue.metadata).forEach(([key, value]) => {
+            metadata.appendChild(el("dt", "", key));
+            metadata.appendChild(el("dd", "", String(value)));
+          });
+          item.appendChild(metadata);
+        }
+        if (operation?.displayCommand) {
+          const command = el("div", "cli-command-row issue-operation");
+          command.appendChild(el("span", "cli-command-label", "将执行"));
+          command.appendChild(el("code", "", operation.displayCommand));
+          item.appendChild(command);
+        }
+        list.appendChild(item);
       });
       previewCard.appendChild(list);
+      previewCard.appendChild(renderIssueApplyControls());
     } else {
       previewCard.appendChild(el("p", "", "不会创建 Multica issue。"));
     }
     return previewCard;
+  }
+
+  function renderIssueApplyControls() {
+    const section = el("section", "issue-apply-card");
+    section.appendChild(el("h4", "", "确认创建业务 Issue"));
+    section.appendChild(el("p", "setting-help", "预览阶段不会写入 Multica。只有输入确认 token 后，才会创建真实业务 Issue；Agent assist issue 不算业务 Issue。"));
+    if (state.issueSplit.confirmationRequired) {
+      const token = state.issueSplit.confirmationToken || "APPLY-MULTICA-ISSUE-SPLIT";
+      const input = el("input", "confirm-input");
+      input.id = "issue-split-confirm";
+      input.value = state.issueApplyConfirm;
+      input.placeholder = token;
+      input.setAttribute("aria-label", "业务 Issue 创建确认 token");
+      section.appendChild(input);
+      const actionRow = el("div", "goal-action-row");
+      const create = el("button", "primary-button");
+      create.type = "button";
+      create.disabled = state.issueApplyStatus === "creating";
+      create.setAttribute("data-action", "apply-issue-split");
+      create.appendChild(makeIcon("plus"));
+      create.appendChild(el("span", "", state.issueApplyStatus === "creating" ? "创建中" : "创建 Multica Issue"));
+      actionRow.appendChild(create);
+      section.appendChild(actionRow);
+      section.appendChild(el("p", "setting-help", `必须输入 ${token}`));
+    }
+    if (state.issueApplyError) {
+      section.appendChild(el("p", "goal-feedback error-text", state.issueApplyError));
+    }
+    if (state.issueApplyResult?.createdIssues?.length) {
+      const created = el("ul", "created-issue-list");
+      state.issueApplyResult.createdIssues.forEach((issue) => {
+        created.appendChild(el("li", "", `${issue.identifier || issue.id} · ${issue.title || "Multica Issue"}`));
+      });
+      section.appendChild(created);
+    }
+    return section;
   }
 
   function renderAssistRunSummary(assist) {
@@ -568,7 +754,7 @@
     preview.disabled = !state.lockedGoal || state.goalPlanStatus === "预览中";
     preview.setAttribute("data-action", "preview-issue-split");
     preview.appendChild(makeIcon("eye"));
-    preview.appendChild(el("span", "", state.goalPlanStatus === "预览中" ? "预览中" : "生成 Plan 并预览 Issue"));
+    preview.appendChild(el("span", "", state.goalPlanStatus === "预览中" ? "预览中" : state.planSet ? "预览业务 Issue" : "生成 Plan 并预览 Issue"));
     const splitLlm = el("button", "outline-button");
     splitLlm.type = "button";
     splitLlm.disabled = !state.lockedGoal || state.goalPlanStatus === "Agent 拆分中";
@@ -579,7 +765,25 @@
     controls.appendChild(preview);
     controls.appendChild(splitLlm);
     planBuilder.appendChild(controls);
-    planBuilder.appendChild(el("p", "goal-feedback", state.planSet ? `${state.planSet.plans.length} 个并行 Plan 已生成，Agent：${state.planSet.assist?.agent?.name || state.planSet.provider?.model || state.planSet.provider?.kind || "Multica Agent"}；Issue 仍只是候选预览，不会创建业务 Multica issue。` : (state.issueSplit?.summary || "Locked Goal 会先生成 Plan，再由 Plan 预览是否需要创建 Multica issue。")));
+    planBuilder.appendChild(el("p", "goal-feedback", state.planSet ? `${state.planSet.plans.length} 个并行 Plan 已生成，Agent：${state.planSet.assist?.agent?.name || state.planSet.provider?.model || state.planSet.provider?.kind || "Multica Agent"}；下一步预览业务 Issue，确认 token 后才会创建真实 Multica Issue。` : (state.issueSplit?.summary || "Locked Goal 会先生成 Plan，再由 Plan 预览是否需要创建 Multica issue。")));
+    if (state.pendingAssist?.issueId) {
+      const pendingCard = el("section", "assist-run-summary");
+      pendingCard.appendChild(el("h3", "", "Assist Issue 收件箱订阅"));
+      const rows = [
+        ["类型", state.pendingAssist.kind === "goal" ? "Goal 澄清" : "Plan 拆分"],
+        ["Issue", state.pendingAssist.issueIdentifier || state.pendingAssist.issueId],
+        ["Agent", state.pendingAssist.agent?.name || state.pendingAssist.agent?.id],
+        ["Request", state.pendingAssist.assistRequestId],
+      ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+      const definition = el("dl", "config-definition");
+      rows.forEach(([label, value]) => {
+        definition.appendChild(el("dt", "", label));
+        definition.appendChild(el("dd", "", String(value)));
+      });
+      pendingCard.appendChild(definition);
+      pendingCard.appendChild(el("p", "setting-help", "页面刷新后会继续订阅同一个 Assist Issue 的评论/运行结果，不会重新创建 assist task。"));
+      planBuilder.appendChild(pendingCard);
+    }
     if (state.planSet?.plans?.length) {
       const planSetCard = el("section", "plan-set-card");
       const planSetHeader = el("div", "split-header");
@@ -1202,6 +1406,165 @@
     setPressed();
   }
 
+  function savePendingAssist(pending) {
+    stopAssistSubscription();
+    state.pendingAssist = pending;
+    mockData.llmAssist.lastAssist = pending.assist || null;
+    persistWorkflowDraft();
+    subscribeToPendingAssist();
+  }
+
+  function clearPendingAssist() {
+    stopAssistSubscription();
+    state.pendingAssist = null;
+    persistWorkflowDraft();
+  }
+
+  function resetIssueApplyState() {
+    state.issueApplyConfirm = "";
+    state.issueApplyStatus = "idle";
+    state.issueApplyResult = null;
+    state.issueApplyError = "";
+  }
+
+  function subscribeToPendingAssist() {
+    const pending = state.pendingAssist;
+    if (!pending?.issueId) return;
+    stopAssistSubscription();
+    state.goalPlanFeedback = `${pending.label || "Agent assist"} 正在运行；已订阅 Assist Issue ${pending.issueIdentifier || pending.issueId} 的收件箱结果。`;
+    renderAll();
+
+    const params = encodeQuery({
+      kind: pending.kind,
+      issueId: pending.issueId,
+      assistRequestId: pending.assistRequestId || "",
+      language: pending.language || state.language,
+      intervalMs: "5000",
+      timeoutMs: String(pending.timeoutMs || 300000)
+    });
+    const EventSourceCtor = window?.EventSource;
+    if (typeof EventSourceCtor === "function") {
+      const eventSource = new EventSourceCtor(`/api/assist/subscribe?${params}`);
+      assistSubscription = { eventSource, timer: null };
+      eventSource.addEventListener("pending", () => {
+        state.goalPlanStatus = pending.kind === "goal" ? "澄清中" : "Agent 拆分中";
+        state.goalPlanFeedback = `${pending.label || "Agent assist"} 仍在运行；正在实时订阅 ${pending.issueIdentifier || pending.issueId}。`;
+        renderAll();
+      });
+      eventSource.addEventListener("completed", async () => {
+        eventSource.close();
+        assistSubscription = null;
+        await pollAssistResultOnce(pending, { fromSubscription: true });
+      });
+      eventSource.addEventListener("blocked", (event) => {
+        eventSource.close();
+        assistSubscription = null;
+        let payload = {};
+        try {
+          payload = JSON.parse(event.data || "{}");
+        } catch {
+          payload = { reason: "multica_agent_result_failed" };
+        }
+        handleAssistBlocked(pending, payload);
+      });
+      eventSource.onerror = () => {
+        eventSource.close();
+        assistSubscription = null;
+        scheduleAssistPolling(pending, 0);
+      };
+      return;
+    }
+
+    scheduleAssistPolling(pending, 0);
+  }
+
+  function scheduleAssistPolling(pending, delayMs) {
+    if (!pending?.issueId) return;
+    const timer = setTimeout(async () => {
+      await pollAssistResultOnce(pending);
+    }, delayMs);
+    assistSubscription = { eventSource: null, timer };
+  }
+
+  async function pollAssistResultOnce(pending, options = {}) {
+    if (!pending?.issueId) return;
+    try {
+      const response = await fetch("/api/assist/result", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: pending.kind,
+          issueId: pending.issueId,
+          assistRequestId: pending.assistRequestId,
+          agent: pending.agent,
+          request: pending.request,
+          context: pending.context,
+          lockedGoal: pending.lockedGoal,
+          availableAgents: pending.availableAgents || [{ id: mockData.agent, role: "planner" }],
+          language: pending.language || state.language
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || (!payload.ok && !payload.pending)) {
+        handleAssistBlocked(pending, payload);
+        return;
+      }
+      if (payload.pending) {
+        state.goalPlanStatus = pending.kind === "goal" ? "澄清中" : "Agent 拆分中";
+        state.goalPlanFeedback = `${pending.label || "Agent assist"} 仍在运行；下一次刷新或订阅会继续读取同一个 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
+        persistWorkflowDraft();
+        renderAll();
+        scheduleAssistPolling(pending, ASSIST_POLL_INTERVAL_MS);
+        return;
+      }
+      completePendingAssist(pending, payload, options);
+    } catch (error) {
+      state.goalPlanStatus = "阻塞";
+      state.goalPlanFeedback = `${pending.label || "Agent assist"} 订阅读取失败：${error.message || String(error)}。刷新页面后会继续订阅同一个 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
+      persistWorkflowDraft();
+      renderAll();
+      scheduleAssistPolling(pending, ASSIST_POLL_INTERVAL_MS);
+    }
+  }
+
+  function completePendingAssist(pending, payload) {
+    if (pending.kind === "goal" && payload.goal) {
+      state.normalizedGoal = payload.goal;
+      state.lockedGoal = null;
+      state.generatedPlan = null;
+      state.planSet = null;
+      state.issueSplit = null;
+      resetIssueApplyState();
+      mockData.llmAssist.lastAssist = payload.assist || payload.goal.assist || pending.assist || null;
+      state.goalPlanStatus = payload.goal.status === "draft" ? "需要澄清" : "已澄清";
+      state.goalPlanFeedback = payload.goal.status === "draft"
+        ? `Agent 已返回目标草稿；Assist Issue：${pending.issueIdentifier || pending.issueId}。`
+        : `${payload.goal.title} 已可锁定；结果来自 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
+      appendRecord("目标已从 Assist Issue 恢复", `${payload.goal.title}；结果来源：${payload.diagnostic?.outputSource || "unknown"}。`);
+    }
+    if (pending.kind === "planSet" && payload.planSet) {
+      state.planSet = payload.planSet;
+      state.generatedPlan = null;
+      state.issueSplit = null;
+      resetIssueApplyState();
+      mockData.llmAssist.lastAssist = payload.assist || payload.planSet.assist || pending.assist || null;
+      state.goalPlanStatus = "已拆分";
+      state.goalPlanFeedback = `Multica Agent 已拆分为 ${payload.planSet.plans.length} 个并行 Plan；结果来自 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
+      appendRecord("Agent 辅助拆分已从 Assist Issue 恢复", `${payload.planSet.plans.length} 个并行 Plan；结果来源：${payload.diagnostic?.outputSource || "unknown"}。`);
+    }
+    clearPendingAssist();
+    persistWorkflowDraft();
+    renderAll();
+  }
+
+  function handleAssistBlocked(pending, payload = {}) {
+    state.goalPlanStatus = "阻塞";
+    state.goalPlanFeedback = `${formatLlmFailure(payload)} Assist Issue：${pending.issueIdentifier || pending.issueId}。`;
+    appendRecord("Agent assist 结果读取阻塞", state.goalPlanFeedback);
+    clearPendingAssist();
+    renderAll();
+  }
+
   function bindEvents() {
     document.addEventListener("click", (event) => {
       const nav = event.target.closest("[data-nav-target]");
@@ -1227,6 +1590,7 @@
         }
         state.language = languageId;
         appendRecord("界面语言已确认", "当前插件界面语言为中文。");
+        persistWorkflowDraft();
         renderAll();
         return;
       }
@@ -1286,6 +1650,8 @@
         lockGoal();
       } else if (kind === "preview-issue-split") {
         previewIssueSplit();
+      } else if (kind === "apply-issue-split") {
+        applyIssueSplit();
       } else if (kind === "split-plan-llm") {
         splitPlanWithLlm();
       } else if (kind === "preview-selected-preset") {
@@ -1332,6 +1698,7 @@
       }
       if (event.target.matches("#goal-request-input")) {
         state.goalRequest = event.target.value;
+        persistWorkflowDraft();
       }
       if (event.target.matches("#llm-custom-command")) {
         mockData.llmAssist.customCommand = event.target.value;
@@ -1351,6 +1718,10 @@
       if (event.target.matches("#llm-secret-confirm")) {
         mockData.llmAssist.secretMetadataConfirm = event.target.value;
       }
+      if (event.target.matches("#issue-split-confirm")) {
+        state.issueApplyConfirm = event.target.value;
+        persistWorkflowDraft();
+      }
     });
 
     document.addEventListener("change", (event) => {
@@ -1365,6 +1736,7 @@
       }
       if (event.target.matches("[data-goal-plan-complexity]")) {
         state.goalPlanComplexity = event.target.value;
+        persistWorkflowDraft();
         renderAll();
       }
     });
@@ -1376,13 +1748,19 @@
     state.goalPlanFeedback = "正在通过 Multica Agent 创建 assist issue/task 并归一化目标...";
     renderAll();
     try {
+      const assistConfig = {
+        ...currentAssistConfig(),
+        chainId: assistChainId("goal", state.goalRequest),
+        requestId: nextAssistRequestId("goal")
+      };
       const response = await fetch("/api/goal/normalize", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           request: state.goalRequest,
           mode: "agent",
-          assist: currentAssistConfig(),
+          async: true,
+          assist: assistConfig,
           language: state.language,
           context: {
             project: mockData.project,
@@ -1394,15 +1772,46 @@
       });
       const payload = await response.json();
       if (!response.ok || !payload.ok) throw new Error(formatLlmFailure(payload));
+      if (payload.pending) {
+        const assist = payload.assist || {};
+        const pending = {
+          kind: "goal",
+          label: "目标澄清",
+          issueId: assist.issue?.id,
+          issueIdentifier: assist.issue?.identifier,
+          agent: assist.agent,
+          assist,
+          timeoutMs: assistConfig.timeoutMs,
+          request: state.goalRequest,
+          context: {
+            project: mockData.project,
+            owner: "Codex monitoring session",
+            source: "gui",
+            language: state.language
+          },
+          language: state.language,
+          assistChainId: payload.assistChainId || assistConfig.chainId,
+          assistRequestId: payload.assistRequestId || assistConfig.requestId
+        };
+        state.goalPlanStatus = "澄清中";
+        state.goalPlanFeedback = `已创建并订阅 Assist Issue ${pending.issueIdentifier || pending.issueId}，等待 Agent 写入目标 JSON。`;
+        savePendingAssist(pending);
+        appendRecord("目标澄清 Assist Issue 已订阅", `正在订阅 ${pending.issueIdentifier || pending.issueId} 的收件箱结果。`);
+        renderAll();
+        return;
+      }
       state.normalizedGoal = payload.goal;
       state.lockedGoal = null;
       state.generatedPlan = null;
+      state.planSet = null;
       state.issueSplit = null;
+      resetIssueApplyState();
       mockData.llmAssist.lastAssist = payload.assist || payload.goal.assist || null;
       state.goalPlanStatus = payload.goal.status === "draft" ? "需要澄清" : "已澄清";
       state.goalPlanFeedback = payload.goal.status === "draft"
         ? "目标仍为草稿。请先回答待澄清问题，再锁定。"
         : `${payload.goal.title} 已可锁定。Assist Issue：${payload.goal.assist?.issue?.identifier || payload.goal.assist?.issue?.id || "已创建"}。`;
+      persistWorkflowDraft();
       appendRecord("目标已澄清", `${payload.goal.title}（${goalStatusLabel(payload.goal.status)}）；通过 Multica Agent assist issue/task 生成。`);
       renderAll();
     } catch (error) {
@@ -1435,6 +1844,7 @@
       state.issueSplit = null;
       state.goalPlanStatus = "已锁定";
       state.goalPlanFeedback = `${payload.goal.title} 已锁定，现在可以预览计划。`;
+      persistWorkflowDraft();
       appendRecord("目标已锁定", `${payload.goal.id} 已由 ${payload.goal.approvedBy} 确认。`);
       renderAll();
     } catch (error) {
@@ -1448,46 +1858,111 @@
   async function previewIssueSplit() {
     if (!state.lockedGoal || state.goalPlanStatus === "预览中") return;
     state.goalPlanStatus = "预览中";
-    state.goalPlanFeedback = "正在生成计划和 Multica issue 拆分预览...";
+    state.goalPlanFeedback = state.planSet
+      ? "正在从并行 Plan 预览业务 Multica Issue..."
+      : "正在生成计划和 Multica issue 拆分预览...";
     renderAll();
     try {
-      const planResponse = await fetch("/api/plan/generate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      let previewBody;
+      if (state.planSet?.plans?.length) {
+        state.generatedPlan = null;
+        previewBody = {
           goal: state.lockedGoal,
-          complexity: state.goalPlanComplexity,
-          language: state.language,
-          availableAgents: [
-            { id: mockData.agent, role: "planner" }
-          ]
-        })
-      });
-      const planPayload = await planResponse.json();
-      if (!planResponse.ok || !planPayload.ok) throw new Error(planPayload.error || "Plan generation failed.");
-      state.generatedPlan = planPayload.plan;
-      state.planSet = null;
+          planSet: state.planSet,
+          language: state.language
+        };
+      } else {
+        const planResponse = await fetch("/api/plan/generate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            goal: state.lockedGoal,
+            complexity: state.goalPlanComplexity,
+            language: state.language,
+            availableAgents: [
+              { id: mockData.agent, role: "planner" }
+            ]
+          })
+        });
+        const planPayload = await planResponse.json();
+        if (!planResponse.ok || !planPayload.ok) throw new Error(planPayload.error || "Plan generation failed.");
+        state.generatedPlan = planPayload.plan;
+        state.planSet = null;
+        previewBody = {
+          goal: state.lockedGoal,
+          plan: state.generatedPlan,
+          language: state.language
+        };
+      }
 
       const splitResponse = await fetch("/api/plan/preview-issues", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          goal: state.lockedGoal,
-          plan: state.generatedPlan,
-          language: state.language
-        })
+        body: JSON.stringify(previewBody)
       });
       const splitPayload = await splitResponse.json();
       if (!splitResponse.ok || !splitPayload.ok) throw new Error(splitPayload.error || "Issue split preview failed.");
       state.issueSplit = splitPayload.issueSplit;
+      resetIssueApplyState();
       state.goalPlanStatus = "已预览";
       state.goalPlanFeedback = state.issueSplit.summary;
+      persistWorkflowDraft();
       appendRecord("Issue 拆分已预览", `${state.issueSplit.mode} · ${state.issueSplit.issues.length} 个 issue 候选。`);
       renderAll();
     } catch (error) {
       state.goalPlanStatus = "失败";
       state.goalPlanFeedback = error.message || String(error);
       appendRecord("Issue 拆分预览失败", state.goalPlanFeedback);
+      renderAll();
+    }
+  }
+
+  async function applyIssueSplit() {
+    if (!state.issueSplit || state.issueApplyStatus === "creating") return;
+    const token = state.issueSplit.confirmationToken || "APPLY-MULTICA-ISSUE-SPLIT";
+    const confirmInputValue = qs("#issue-split-confirm")?.value ?? state.issueApplyConfirm;
+    state.issueApplyConfirm = confirmInputValue;
+    if (state.issueSplit.confirmationRequired && confirmInputValue !== token) {
+      state.issueApplyStatus = "blocked";
+      state.issueApplyError = `必须输入 ${token}`;
+      persistWorkflowDraft();
+      renderAll();
+      return;
+    }
+
+    state.issueApplyStatus = "creating";
+    state.issueApplyError = "";
+    state.goalPlanFeedback = "正在创建真实业务 Multica Issue...";
+    renderAll();
+    try {
+      const response = await fetch("/api/plan/apply-issues", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          issueSplit: state.issueSplit,
+          execute: true,
+          confirm: confirmInputValue
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok || !payload.result?.ok) {
+        throw new Error(payload.error || payload.result?.error || "Issue create failed.");
+      }
+      state.issueApplyStatus = "created";
+      state.issueApplyResult = payload.result;
+      state.issueApplyError = "";
+      state.goalPlanStatus = "Issue 已创建";
+      state.goalPlanFeedback = `已创建 ${payload.result.createdIssues?.length || 0} 个业务 Multica Issue。`;
+      persistWorkflowDraft();
+      appendRecord("业务 Issue 已创建", `${payload.result.createdIssues?.map((issue) => issue.identifier || issue.id).filter(Boolean).join(", ") || "无返回 id"}。`);
+      renderAll();
+    } catch (error) {
+      state.issueApplyStatus = "failed";
+      state.issueApplyError = error.message || String(error);
+      state.goalPlanStatus = "失败";
+      state.goalPlanFeedback = state.issueApplyError;
+      appendRecord("业务 Issue 创建失败", state.issueApplyError);
+      persistWorkflowDraft();
       renderAll();
     }
   }
@@ -1513,6 +1988,11 @@
       }
       mockData.llmAssist.providerStatus = "已发现";
       mockData.llmAssist.providerSummary = `${providerPayload.selectedAgent.name || providerPayload.selectedAgent.id} · ${providerPayload.selectedAgent.model || "runtime default"}`;
+      const assistConfig = {
+        ...currentAssistConfig(),
+        chainId: assistChainId("planSet", state.lockedGoal?.id || state.lockedGoal?.objective || state.lockedGoal?.title),
+        requestId: nextAssistRequestId("planSet")
+      };
 
       const splitResponse = await fetch("/api/plan/split", {
         method: "POST",
@@ -1520,7 +2000,8 @@
         body: JSON.stringify({
           goal: state.lockedGoal,
           mode: "agent",
-          assist: currentAssistConfig(),
+          async: true,
+          assist: assistConfig,
           language: state.language,
           availableAgents: [
             { id: mockData.agent, role: "planner" }
@@ -1531,12 +2012,37 @@
       if (!splitResponse.ok || !splitPayload.ok) {
         throw new Error(formatLlmFailure(splitPayload));
       }
+      if (splitPayload.pending) {
+        const assist = splitPayload.assist || {};
+        const pending = {
+          kind: "planSet",
+          label: "Plan 拆分",
+          issueId: assist.issue?.id,
+          issueIdentifier: assist.issue?.identifier,
+          agent: assist.agent,
+          assist,
+          timeoutMs: assistConfig.timeoutMs,
+          lockedGoal: state.lockedGoal,
+          availableAgents: [{ id: mockData.agent, role: "planner" }],
+          language: state.language,
+          assistChainId: splitPayload.assistChainId || assistConfig.chainId,
+          assistRequestId: splitPayload.assistRequestId || assistConfig.requestId
+        };
+        state.goalPlanStatus = "Agent 拆分中";
+        state.goalPlanFeedback = `已创建并订阅 Assist Issue ${pending.issueIdentifier || pending.issueId}，等待 Agent 写入 PlanSet JSON。`;
+        savePendingAssist(pending);
+        appendRecord("Plan 拆分 Assist Issue 已订阅", `正在订阅 ${pending.issueIdentifier || pending.issueId} 的收件箱结果。`);
+        renderAll();
+        return;
+      }
       state.planSet = splitPayload.planSet;
       state.generatedPlan = null;
       state.issueSplit = null;
+      resetIssueApplyState();
       state.goalPlanStatus = "已拆分";
       mockData.llmAssist.lastAssist = splitPayload.assist || state.planSet.assist || null;
       state.goalPlanFeedback = `Multica Agent 已拆分为 ${state.planSet.plans.length} 个并行 Plan。Assist Issue：${state.planSet.assist?.issue?.identifier || state.planSet.assist?.issue?.id || "已创建"}。`;
+      persistWorkflowDraft();
       appendRecord("Agent 辅助拆分已完成", `${state.planSet.assist?.agent?.name || "Multica Agent"} · ${state.planSet.plans.length} 个并行 Plan。`);
       renderAll();
     } catch (error) {
@@ -1744,6 +2250,8 @@
       assist_agent_not_found: "所选 Multica Agent 不存在或已不可用，请重新检测 Agent。",
       multica_cli_not_found: "Multica CLI 不可用：请确认 multica 已安装并在 PATH 中，或从本地 GUI server 指定 cliPath。",
       multica_cli_failed: "Multica CLI 调用失败：请检查 daemon、workspace 和 CLI 输出。",
+      multica_issue_duplicate_blocked: "Multica 拦截了重复 assist issue：请关闭已有 assist issue，或升级到允许重复创建的本地 GUI server。",
+      multica_api_network_failed: "Multica API 网络连接失败：daemon 正在运行，但 CLI 访问 api.multica.ai 时失败。请检查网络、代理、TLS/DNS 或稍后重试。",
       multica_auth_required: "Multica CLI 需要认证：请先完成 Multica 登录或检查本机 daemon 权限。",
       multica_daemon_unavailable: "Multica daemon 不可用：请先运行或重启 multica daemon。",
       multica_agent_timeout: "Multica Agent assist task 超时：默认等待 5 分钟。请在 Multica 中查看 assist issue/run 状态，或在设置中继续增大运行超时。",
@@ -1770,6 +2278,9 @@
     };
     const base = messages[reason] || String(reason);
     const detail = payload.diagnostic?.result?.stderrExcerpt
+      || payload.diagnostic?.create?.stderrExcerpt
+      || payload.diagnostic?.poll?.stderrExcerpt
+      || payload.diagnostic?.poll?.lastRunsResult?.stderrExcerpt
       || payload.diagnostic?.invocation?.result?.stderrExcerpt
       || payload.diagnostic?.help?.stderrExcerpt
       || "";
@@ -1964,6 +2475,9 @@
     bindEvents();
     await loadPresetLibrary();
     renderAll();
+    if (state.pendingAssist?.issueId) {
+      subscribeToPendingAssist();
+    }
   }
 
   if (document.readyState === "loading") {
