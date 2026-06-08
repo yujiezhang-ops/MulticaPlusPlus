@@ -127,9 +127,14 @@ Codex Agent` preset 还提供 `Create Image2 Codex Agent`，通过本地 GUI ser
   若已有 Agent PlanSet，则直接按每个 subPlan 预览一个业务 Issue 候选，不会重新
   生成 Plan。
 - `Plan 到 Issue 预览` 展示 title、priority、description 摘要、metadata 和将执行
-  的 `multica issue create` 操作。只有输入 `APPLY-MULTICA-ISSUE-SPLIT` 并点击
-  `创建 Multica Issue` 后，GUI server 才会调用 `/api/plan/apply-issues` 创建真实
-  业务 Issue 并写 metadata。
+  的 `multica issue create` 操作。每张候选卡片都有 `创建此 Issue` 和 `复制命令`；
+  总确认区保留 `创建全部 Multica Issue`。只有输入
+  `APPLY-MULTICA-ISSUE-SPLIT` 后，GUI server 才会调用 `/api/plan/apply-issues`
+  创建真实业务 Issue 并写 metadata。已创建的候选会显示 `打开 Issue` 和
+  `复制 Issue ID`，再次批量创建时会跳过已创建候选。
+- `Issue 执行跟踪` 会读取本地订阅表，分组展示 `Assist Goal`、`Assist Plan` 和
+  `Business Issues`。前端只维护一个 60 秒聚合轮询 loop，不为每个 issue 单独建
+  连接；同步最多读取 30 个活跃订阅。
 - Plan 当前步骤高亮。
 - 权限模板、TTL 和审批开关改变本地预览。
 - Preview / Apply 按钮只写入页面内 mock record。
@@ -246,6 +251,10 @@ Image2 流程会：
 - 业务 Issue 创建走单独的 Plan/PlanSet preview-first 流程：预览不写 Multica，真实
   创建必须输入 `APPLY-MULTICA-ISSUE-SPLIT` 并由本地 GUI server 调用
   `/api/plan/apply-issues`。
+- 本地 Issue 订阅表默认存储在 `out/issue-subscriptions.json`，不会提交仓库。订阅
+  同步只调用 `multica issue list --output json`、`multica issue runs <issueId>
+  --output json` 和 `multica issue comment list <issueId> --output json`，不会修改
+  Multica issue。
 - Agent 辅助 prompt 和本地 Issue preview 会使用当前请求语言；中文 UI 下默认生成
   中文 Plan 和 Issue 候选文案。
 - 旧 LLM 直连桥不直接发起 API key HTTP 调用，并仅在高级兼容路径中使用。

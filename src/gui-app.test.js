@@ -839,6 +839,21 @@ test("GUI previews and explicitly creates business issues from an Agent PlanSet"
         const body = JSON.parse(options.body);
         assert.equal(body.execute, true);
         assert.equal(body.confirm, "APPLY-MULTICA-ISSUE-SPLIT");
+        if (body.issuePreviewId) {
+          assert.equal(body.issuePreviewId, "issue_preview_2");
+          return responseJson({
+            ok: true,
+            result: {
+              ok: true,
+              mode: "execute",
+              issueSplitId: "issue_split_1",
+              createdIssues: [
+                { id: "issue-2", identifier: "SPA-202", title: "实现 Goal Plan 模块 · 计划拆分 Plan", issuePreviewId: "issue_preview_2" },
+              ],
+              operations: [],
+            },
+          });
+        }
         return responseJson({
           ok: true,
           result: {
@@ -868,7 +883,9 @@ test("GUI previews and explicitly creates business issues from an Agent PlanSet"
 
   assert.ok(document.textContent().includes("Plan 到 Issue 预览"));
   assert.ok(document.textContent().includes("预览业务 Issue"));
-  assert.ok(document.textContent().includes("创建 Multica Issue"));
+  assert.ok(document.textContent().includes("创建全部 Multica Issue"));
+  assert.ok(document.textContent().includes("创建此 Issue"));
+  assert.ok(document.textContent().includes("复制命令"));
   assert.ok(document.textContent().includes("plan_set_1"));
   assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/generate").length, 0);
   assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/apply-issues").length, 0);
@@ -880,13 +897,109 @@ test("GUI previews and explicitly creates business issues from an Agent PlanSet"
   assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/apply-issues").length, 0);
 
   document.querySelector("#issue-split-confirm").value = "APPLY-MULTICA-ISSUE-SPLIT";
-  createButton.dispatchEvent({ type: "click", target: createButton });
+  const singleCreateButton = document.querySelector("[data-action='apply-single-issue'][data-issue-preview-id='issue_preview_2']");
+  assert.ok(singleCreateButton, "single issue create button should render for each preview card");
+  singleCreateButton.dispatchEvent({ type: "click", target: singleCreateButton });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/apply-issues").length, 1);
+  assert.ok(document.textContent().includes("SPA-202"));
+  assert.ok(document.textContent().includes("打开 Issue"));
+  assert.ok(document.textContent().includes("复制 Issue ID"));
+
+  createButton.dispatchEvent({ type: "click", target: createButton });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/apply-issues").length, 2);
   assert.ok(document.textContent().includes("SPA-201"));
   assert.ok(document.textContent().includes("SPA-202"));
   assert.ok(storage.getItem("multica-plusplus.workflow.v1").includes("issue-1"));
+});
+
+test("GUI loads and syncs issue subscriptions as one aggregate polling loop", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document } = createTinyDocument();
+  const fetchCalls = [];
+  const timers = [];
+
+  new Script(appSource).runInContext(createContext({
+    document,
+    window: { localStorage: createMemoryStorage() },
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/issue-subscriptions") {
+        return responseJson({
+          ok: true,
+          subscriptions: [
+            {
+              id: "sub-assist-goal",
+              kind: "assist_goal",
+              issueId: "assist-goal-1",
+              issueIdentifier: "SPA-10",
+              title: "Goal 澄清 Assist Issue",
+              state: "active",
+              lastKnownStatus: "todo",
+            },
+            {
+              id: "sub-assist-plan",
+              kind: "assist_plan_split",
+              issueId: "assist-plan-1",
+              issueIdentifier: "SPA-11",
+              title: "Plan 拆分 Assist Issue",
+              state: "active",
+              lastRunStatus: "running",
+            },
+            {
+              id: "sub-business",
+              kind: "business_issue",
+              issueId: "business-1",
+              issueIdentifier: "SPA-12",
+              title: "业务 Issue",
+              state: "active",
+              lastKnownStatus: "in_progress",
+              lastCommentExcerpt: "正在处理业务 Issue。",
+            },
+          ],
+        });
+      }
+      if (url === "/api/issue-subscriptions/sync") {
+        return responseJson({
+          ok: true,
+          synced: [
+            {
+              id: "sub-business",
+              kind: "business_issue",
+              issueId: "business-1",
+              issueIdentifier: "SPA-12",
+              title: "业务 Issue",
+              state: "active",
+              lastKnownStatus: "in_progress",
+              lastRunStatus: "running",
+              lastCommentExcerpt: "同步后的业务 Issue 摘要。",
+            },
+          ],
+          skipped: [],
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout: (fn, ms) => {
+      timers.push(ms);
+      return timers.length;
+    },
+    clearTimeout,
+    Date,
+  }));
+
+  await waitFor(() => document.textContent().includes("Issue 执行跟踪"));
+  assert.ok(document.textContent().includes("Assist Goal"));
+  assert.ok(document.textContent().includes("Assist Plan"));
+  assert.ok(document.textContent().includes("Business Issues"));
+  assert.ok(document.textContent().includes("SPA-12"));
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/issue-subscriptions").length, 1);
+  assert.equal(timers.includes(60000), true);
 });
 
 test("GUI restores Agent-assisted PlanSet after a browser refresh", async () => {
@@ -1281,6 +1394,15 @@ function createTinyDocument() {
       if (type === "click") clickHandlers.push(handler);
     },
     querySelector(selector) {
+      if (selector.startsWith("[data-action='") && selector.includes("'][data-issue-preview-id='")) {
+        const match = selector.match(/^\[data-action='([^']+)'\]\[data-issue-preview-id='([^']+)'\]$/);
+        if (match) {
+          return findNodeByAttributes(document.body, {
+            "data-action": match[1],
+            "data-issue-preview-id": match[2],
+          });
+        }
+      }
       if (selector.startsWith("[data-agent-preset-id='")) {
         const id = selector.slice("[data-agent-preset-id='".length, -2);
         return findNodeByAttribute(document.body, "data-agent-preset-id", id);
@@ -1448,6 +1570,7 @@ function createTinyDocument() {
       closest(selector) {
         if (selector === "[data-action]" && attributes.has("data-action")) return this;
         if (selector === "[data-agent-preset]" && attributes.has("data-agent-preset")) return this;
+        if (selector === "[data-issue-preview-id]" && attributes.has("data-issue-preview-id")) return this;
         if (selector === "[data-nav-target]" && attributes.has("data-nav-target")) return this;
         return null;
       },
@@ -1476,6 +1599,16 @@ function findNodeByAttribute(root, name, value) {
   if (root.getAttribute?.(name) === value) return root;
   for (const child of root.children ?? []) {
     const match = findNodeByAttribute(child, name, value);
+    if (match) return match;
+  }
+  return null;
+}
+
+function findNodeByAttributes(root, expected) {
+  if (!root) return null;
+  if (Object.entries(expected).every(([name, value]) => root.getAttribute?.(name) === value)) return root;
+  for (const child of root.children ?? []) {
+    const match = findNodeByAttributes(child, expected);
     if (match) return match;
   }
   return null;

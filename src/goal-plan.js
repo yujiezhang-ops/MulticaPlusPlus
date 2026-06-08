@@ -443,25 +443,17 @@ export function previewIssueSplit({
       ? [buildIssuePreview({ goal, plan, projectId, priority: priority || "medium", language: normalizedLanguage, createdAt })]
       : buildMultiIssuePreview({ goal, plan, projectId, priority: priority || "medium", language: normalizedLanguage, createdAt });
 
+  const issuesWithOperations = attachIssueOperationSummaries(issues);
   return {
     id: stableId("issue_split", `${goal.id}:${plan.id}:${mode}`),
     createdAt,
     language: normalizedLanguage,
     mode,
-    confirmationRequired: issues.length > 0,
-    confirmationToken: issues.length > 0 ? ISSUE_CONFIRMATION_TOKEN : "",
-    summary: summarizeIssueSplit(mode, issues.length, normalizedLanguage),
-    issues,
-    operations: issues.map((issue) => ({
-      type: "issue:create",
-      risk: "write",
-      title: issue.title,
-      description: issue.description,
-      priority: issue.priority,
-      projectId: issue.projectId,
-      metadata: issue.metadata,
-      displayCommand: formatIssueCreateCommand(issue),
-    })),
+    confirmationRequired: issuesWithOperations.length > 0,
+    confirmationToken: issuesWithOperations.length > 0 ? ISSUE_CONFIRMATION_TOKEN : "",
+    summary: summarizeIssueSplit(mode, issuesWithOperations.length, normalizedLanguage),
+    issues: issuesWithOperations,
+    operations: issuesWithOperations.map((issue) => buildIssueOperationSummary(issue)),
   };
 }
 
@@ -481,7 +473,13 @@ export function previewIssueSplitFromPlanSet({
     id: stableId("issue_preview", `${goal.id}:${planSet.id}:${plan.id}`),
     createdAt,
     title: `${goal.title} · ${plan.title}`,
-    description: renderIssueDescription({ goal, steps: plan.steps, language: normalizedLanguage }),
+    description: renderIssueDescription({
+      goal,
+      subPlan: plan,
+      planSet,
+      steps: plan.steps,
+      language: normalizedLanguage,
+    }),
     priority: priority || "medium",
     projectId,
     metadata: {
@@ -494,31 +492,24 @@ export function previewIssueSplitFromPlanSet({
       provider_source: planSet.provider?.source ?? "",
     },
   }));
+  const issuesWithOperations = attachIssueOperationSummaries(issues);
 
   return {
     id: stableId("issue_split", `${goal.id}:${planSet.id}:plan_set`),
     createdAt,
     language: normalizedLanguage,
     mode: "plan_set",
-    confirmationRequired: issues.length > 0,
-    confirmationToken: issues.length > 0 ? ISSUE_CONFIRMATION_TOKEN : "",
-    summary: summarizePlanSetIssueSplit(issues.length, normalizedLanguage),
-    issues,
-    operations: issues.map((issue) => ({
-      type: "issue:create",
-      risk: "write",
-      title: issue.title,
-      description: issue.description,
-      priority: issue.priority,
-      projectId: issue.projectId,
-      metadata: issue.metadata,
-      displayCommand: formatIssueCreateCommand(issue),
-    })),
+    confirmationRequired: issuesWithOperations.length > 0,
+    confirmationToken: issuesWithOperations.length > 0 ? ISSUE_CONFIRMATION_TOKEN : "",
+    summary: summarizePlanSetIssueSplit(issuesWithOperations.length, normalizedLanguage),
+    issues: issuesWithOperations,
+    operations: issuesWithOperations.map((issue) => buildIssueOperationSummary(issue)),
   };
 }
 
 export async function applyIssueSplit({
   issueSplit,
+  issuePreviewId = "",
   exec,
   execute = false,
   confirm = "",
@@ -528,6 +519,7 @@ export async function applyIssueSplit({
   if (!issueSplit) {
     throw new Error("issue split preview is required");
   }
+  const selectedIssues = selectIssueCandidates(issueSplit, issuePreviewId);
   if (!execute) {
     return {
       ok: true,
@@ -535,9 +527,10 @@ export async function applyIssueSplit({
       createdAt,
       issueSplitId: issueSplit.id ?? "",
       createdIssues: [],
-      operations: issueSplit.issues.map((issue) => ({
+      operations: selectedIssues.map((issue) => ({
         type: "issue:create",
         status: "planned",
+        issuePreviewId: issue.id ?? "",
         title: issue.title,
         displayCommand: formatIssueCreateCommand(issue),
         metadata: issue.metadata ?? {},
@@ -558,8 +551,20 @@ export async function applyIssueSplit({
 
   const operations = [];
   const createdIssues = [];
-  for (let index = 0; index < issueSplit.issues.length; index += 1) {
-    const issue = issueSplit.issues[index];
+  for (let index = 0; index < selectedIssues.length; index += 1) {
+    const issue = selectedIssues[index];
+    const existingIssue = normalizeCreatedIssue(issue.createdIssue);
+    if (existingIssue) {
+      operations.push({
+        type: "issue:create",
+        status: "skipped",
+        issuePreviewId: issue.id ?? "",
+        title: issue.title,
+        displayCommand: formatIssueCreateCommand(issue),
+        createdIssue: existingIssue,
+      });
+      continue;
+    }
     const descriptionFile = await writeDescriptionFile(issue, index);
     const createArgs = buildIssueCreateArgs(issue, descriptionFile);
     const createResult = await exec(createArgs);
@@ -569,6 +574,7 @@ export async function applyIssueSplit({
       args: createArgs,
       result: createResult,
       title: issue.title,
+      issuePreviewId: issue.id ?? "",
     });
     operations.push(createOperation);
     if (createResult.code !== 0) {
@@ -590,6 +596,8 @@ export async function applyIssueSplit({
       id: issueId,
       identifier: String(created.identifier ?? ""),
       title: String(created.title ?? issue.title),
+      issuePreviewId: issue.id ?? "",
+      metadata: issue.metadata ?? {},
     };
     createdIssues.push(createdIssue);
 
@@ -613,6 +621,7 @@ export async function applyIssueSplit({
         args: metadataArgs,
         result: metadataResult,
         title: `${issue.title}:${key}`,
+        issuePreviewId: issue.id ?? "",
       }));
       if (metadataResult.code !== 0) {
         return {
@@ -986,6 +995,27 @@ function buildIssuePreview({ goal, plan, projectId, priority, language, createdA
   };
 }
 
+function attachIssueOperationSummaries(issues) {
+  return issues.map((issue) => ({
+    ...issue,
+    operationSummary: buildIssueOperationSummary(issue),
+  }));
+}
+
+function buildIssueOperationSummary(issue) {
+  return {
+    type: "issue:create",
+    risk: "write",
+    issuePreviewId: issue.id ?? "",
+    title: issue.title,
+    description: issue.description,
+    priority: issue.priority,
+    projectId: issue.projectId,
+    metadata: issue.metadata,
+    displayCommand: formatIssueCreateCommand(issue),
+  };
+}
+
 function buildIssueCreateArgs(issue, descriptionFile) {
   const args = [
     "issue",
@@ -1027,16 +1057,97 @@ function buildMultiIssuePreview({ goal, plan, projectId, priority, language, cre
   }));
 }
 
-function renderIssueDescription({ goal, steps, language }) {
+function renderIssueDescription({ goal, steps, subPlan, planSet, language }) {
   const normalizedLanguage = normalizeLanguage(language);
+  const successCriteria = normalizeStringArray(goal.successCriteria);
+  const constraints = normalizeStringArray(goal.constraints);
+  const risks = normalizeStringArray(goal.risks);
+  const normalizedSteps = Array.isArray(steps) ? steps : [];
+  const dependencies = normalizeDependencies(subPlan?.dependencies);
+  const workstream = subPlan?.workstream ?? {};
+  if (subPlan) {
+    return normalizedLanguage === "en-US"
+      ? [
+        `Goal title: ${goal.title || "Untitled Goal"}`,
+        `Goal objective: ${goal.objective}`,
+        "",
+        "Success criteria:",
+        ...(successCriteria.length ? successCriteria.map((item) => `- ${item}`) : ["- Confirm measurable success criteria with the owner before execution."]),
+        "",
+        "Goal constraints:",
+        ...(constraints.length ? constraints.map((item) => `- ${item}`) : ["- Stay within the locked Goal scope unless a human approves a scope change."]),
+        "",
+        "Goal risks:",
+        ...(risks.length ? risks.map((item) => `- ${item}`) : ["- Record review or execution failures visibly; do not silently drop errors."]),
+        "",
+        "Sub-plan:",
+        `- Title: ${subPlan.title || "Untitled Plan"}`,
+        `- Objective: ${subPlan.objective || ""}`,
+        `- Workstream: ${workstream.label || workstream.id || "workstream"}${workstream.reason ? ` (${workstream.reason})` : ""}`,
+        `- Suggested Agent: ${subPlan.suggestedAgent || "Unassigned"}`,
+        `- Dependencies: ${dependencies.length ? dependencies.join(", ") : "None"}`,
+        `- PlanSet: ${planSet?.id || subPlan.planSetId || ""}`,
+        "",
+        "Plan steps:",
+        ...(normalizedSteps.length ? normalizedSteps.map(formatEnglishStepLine) : ["- [ ] Confirm the executable steps with the owner."]),
+        "",
+        "Acceptance evidence:",
+        `- ${subPlan.acceptanceEvidence || "Attach evidence that this sub-plan is complete."}`,
+        ...normalizedSteps.map((step) => `- ${step.title}: ${step.acceptanceEvidence || "Evidence required."}`),
+        "",
+        "Target boundary:",
+        "- This business Issue represents this sub-plan only. Do not merge unrelated workstreams into this Issue without human review.",
+        "- Agent assist issues/tasks are tracking inputs only and are not business delivery Issues.",
+        "",
+        "Fixed safety boundary:",
+        "- Created from Multica++ Issue split preview.",
+        "- Do not change permissions, skills, schema, or metadata without human confirmation.",
+      ].join("\n")
+      : [
+        `Goal 标题：${goal.title || "未命名目标"}`,
+        `Goal 目标：${goal.objective}`,
+        "",
+        "成功标准：",
+        ...(successCriteria.length ? successCriteria.map((item) => `- ${item}`) : ["- 执行前先与负责人确认可衡量成功标准。"]),
+        "",
+        "目标约束：",
+        ...(constraints.length ? constraints.map((item) => `- ${item}`) : ["- 除非人工确认范围变更，否则保持在 locked Goal 范围内。"]),
+        "",
+        "目标风险：",
+        ...(risks.length ? risks.map((item) => `- ${item}`) : ["- 审查或执行失败必须可见记录，不能静默丢失。"]),
+        "",
+        "SubPlan：",
+        `- 标题：${subPlan.title || "未命名 Plan"}`,
+        `- 目标：${subPlan.objective || ""}`,
+        `- 工作流：${workstream.label || workstream.id || "workstream"}${workstream.reason ? `（${workstream.reason}）` : ""}`,
+        `- 建议 Agent：${subPlan.suggestedAgent || "未指定"}`,
+        `- 依赖：${dependencies.length ? dependencies.join(", ") : "无"}`,
+        `- PlanSet：${planSet?.id || subPlan.planSetId || ""}`,
+        "",
+        "计划步骤：",
+        ...(normalizedSteps.length ? normalizedSteps.map(formatChineseStepLine) : ["- [ ] 与负责人确认可执行步骤。"]),
+        "",
+        "验收证据：",
+        `- ${subPlan.acceptanceEvidence || "需要附上该 subPlan 完成证据。"}`,
+        ...normalizedSteps.map((step) => `- ${step.title}：${step.acceptanceEvidence || "需要验收证据。"}`),
+        "",
+        "本次目标边界：",
+        "- 这个业务 Issue 只承载当前 subPlan，不得未经人工审查合并无关工作流。",
+        "- Agent assist issue/task 只用于辅助生成和跟踪输入，不等同于业务交付 Issue。",
+        "",
+        "固定安全边界：",
+        "- 由 Multica++ Issue 拆分预览生成。",
+        "- 未经人工确认，不得修改权限、技能、schema 或 metadata。",
+      ].join("\n");
+  }
   const lines = normalizedLanguage === "en-US" ? [
     `Goal: ${goal.objective}`,
     "",
     "Success criteria:",
-    ...(goal.successCriteria.length ? goal.successCriteria.map((item) => `- ${item}`) : ["- Confirm with owner before execution."]),
+    ...(successCriteria.length ? successCriteria.map((item) => `- ${item}`) : ["- Confirm with owner before execution."]),
     "",
     "Plan steps:",
-    ...steps.map((step) => `- [ ] ${step.title}: ${step.description}`),
+    ...normalizedSteps.map((step) => `- [ ] ${step.title}: ${step.description}`),
     "",
     "Boundary:",
     "- Created from Multica++ issue split preview.",
@@ -1045,16 +1156,58 @@ function renderIssueDescription({ goal, steps, language }) {
     `目标：${goal.objective}`,
     "",
     "成功标准：",
-    ...(goal.successCriteria.length ? goal.successCriteria.map((item) => `- ${item}`) : ["- 执行前先与负责人确认。"]),
+    ...(successCriteria.length ? successCriteria.map((item) => `- ${item}`) : ["- 执行前先与负责人确认。"]),
     "",
     "计划步骤：",
-    ...steps.map((step) => `- [ ] ${step.title}：${step.description}`),
+    ...normalizedSteps.map((step) => `- [ ] ${step.title}：${step.description}`),
     "",
     "边界：",
     "- 由 Multica++ Issue 拆分预览生成。",
     "- 未经人工确认，不得修改权限、技能、schema 或 metadata。",
   ];
   return lines.join("\n");
+}
+
+function formatEnglishStepLine(step) {
+  const dependencies = normalizeDependencies(step.dependencies);
+  const suffix = [
+    step.description,
+    dependencies.length ? `Dependencies: ${dependencies.join(", ")}` : "",
+    step.acceptanceEvidence ? `Evidence: ${step.acceptanceEvidence}` : "",
+  ].filter(Boolean).join(" | ");
+  return `- [ ] ${step.title}${suffix ? `: ${suffix}` : ""}`;
+}
+
+function formatChineseStepLine(step) {
+  const dependencies = normalizeDependencies(step.dependencies);
+  const suffix = [
+    step.description,
+    dependencies.length ? `依赖：${dependencies.join(", ")}` : "",
+    step.acceptanceEvidence ? `验收证据：${step.acceptanceEvidence}` : "",
+  ].filter(Boolean).join(" | ");
+  return `- [ ] ${step.title}${suffix ? `：${suffix}` : ""}`;
+}
+
+function selectIssueCandidates(issueSplit, issuePreviewId) {
+  const issues = Array.isArray(issueSplit.issues) ? issueSplit.issues : [];
+  if (!issuePreviewId) return issues;
+  const selected = issues.filter((issue) => issue.id === issuePreviewId);
+  if (!selected.length) {
+    throw new Error(`unknown issue preview id: ${issuePreviewId}`);
+  }
+  return selected;
+}
+
+function normalizeCreatedIssue(value) {
+  if (!value || typeof value !== "object") return null;
+  const id = String(value.id ?? value.identifier ?? "");
+  if (!id) return null;
+  return {
+    id,
+    identifier: String(value.identifier ?? ""),
+    title: String(value.title ?? ""),
+    issuePreviewId: String(value.issuePreviewId ?? ""),
+  };
 }
 
 function inferGoalTitle(request, project, language) {

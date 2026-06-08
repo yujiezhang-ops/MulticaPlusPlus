@@ -30,6 +30,13 @@ import {
 } from "./goal-plan.js";
 import { diagnoseLlmProvider, discoverLlmProviders, readLlmSecretMetadata } from "./llm-assist.js";
 import {
+  deleteIssueSubscription,
+  listIssueSubscriptions,
+  registerIssueSubscription,
+  setIssueSubscriptionState,
+  syncIssueSubscriptions,
+} from "./issue-subscriptions.js";
+import {
   checkMulticaAgentAssistResult,
   diagnoseAssistAgents,
   discoverAssistAgents,
@@ -40,6 +47,7 @@ import {
 } from "./multica-agent-assist.js";
 
 const DEFAULT_AUDIT_PATH = "out/agent-config-events.jsonl";
+const DEFAULT_SUBSCRIPTION_STORE_PATH = "out/issue-subscriptions.json";
 const IMAGE2_CONFIRMATION_TOKEN = "CREATE-MULTICA-IMAGE2-CODEX-AGENT";
 const PRESET_CONFIRMATION_TOKEN = "CREATE-MULTICA-AGENT-FROM-PRESET";
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 5000;
@@ -50,6 +58,7 @@ export async function createGuiServer({
   port = 8787,
   guiDir = "gui",
   auditPath = DEFAULT_AUDIT_PATH,
+  subscriptionStorePath = DEFAULT_SUBSCRIPTION_STORE_PATH,
   cliPath = "multica",
   discoveryTimeoutMs = DEFAULT_DISCOVERY_TIMEOUT_MS,
   discoveryRetries = DEFAULT_DISCOVERY_RETRIES,
@@ -83,6 +92,7 @@ export async function createGuiServer({
           request,
           response,
           auditPath,
+          subscriptionStorePath,
           cliPath,
           assistExec: assistExec ?? exec,
           llmProviderConfig,
@@ -111,8 +121,43 @@ export async function createGuiServer({
           request,
           response,
           auditPath,
+          subscriptionStorePath,
           cliPath,
           exec,
+        });
+        return;
+      }
+      if (request.method === "GET" && requestPathname(request) === "/api/issue-subscriptions") {
+        await handleIssueSubscriptionsList({ response, subscriptionStorePath });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/issue-subscriptions/sync") {
+        await handleIssueSubscriptionsSync({
+          request,
+          response,
+          auditPath,
+          subscriptionStorePath,
+          cliPath,
+          exec,
+        });
+        return;
+      }
+      const subscriptionActionMatch = requestPathname(request).match(/^\/api\/issue-subscriptions\/([^/]+)\/(pause|resume)$/);
+      if (request.method === "POST" && subscriptionActionMatch) {
+        await handleIssueSubscriptionState({
+          response,
+          subscriptionStorePath,
+          id: decodeURIComponent(subscriptionActionMatch[1]),
+          state: subscriptionActionMatch[2] === "pause" ? "paused" : "active",
+        });
+        return;
+      }
+      const subscriptionDeleteMatch = requestPathname(request).match(/^\/api\/issue-subscriptions\/([^/]+)$/);
+      if (request.method === "DELETE" && subscriptionDeleteMatch) {
+        await handleIssueSubscriptionDelete({
+          response,
+          subscriptionStorePath,
+          id: decodeURIComponent(subscriptionDeleteMatch[1]),
         });
         return;
       }
@@ -198,6 +243,7 @@ export async function createGuiServer({
           request,
           response,
           auditPath,
+          subscriptionStorePath,
           cliPath,
           assistExec: assistExec ?? exec,
           llmProviderConfig,
@@ -314,6 +360,7 @@ async function handleGoalNormalize({
   request,
   response,
   auditPath,
+  subscriptionStorePath,
   cliPath,
   assistExec,
   llmProviderConfig,
@@ -389,6 +436,14 @@ async function handleGoalNormalize({
         sendJson(response, 200, start);
         return;
       }
+      await registerIssueSubscriptionFromAssist({
+        subscriptionStorePath,
+        kind: "assist_goal",
+        source: "goal_clarification",
+        assist: start.assist,
+        title: `Goal 澄清 Assist Issue · ${body.request || "未命名目标"}`,
+        goalId: "",
+      });
       await appendAuditEvent(auditPath, {
         timestamp: new Date().toISOString(),
         source: "gui-server",
@@ -981,23 +1036,34 @@ async function handleIssueSplitPreview({ request, response, auditPath }) {
   sendJson(response, 200, { ok: true, issueSplit });
 }
 
-async function handleIssueSplitApply({ request, response, auditPath, cliPath, exec }) {
+async function handleIssueSplitApply({ request, response, auditPath, subscriptionStorePath, cliPath, exec }) {
   const body = await readJsonBody(request);
   const execute = body.execute === true;
   const issueSplit = body.issueSplit;
+  const issuePreviewId = body.issuePreviewId || "";
 
   try {
     const result = execute
       ? await applyIssueSplitWithGuiCli({
         issueSplit,
+        issuePreviewId,
         cliPath,
         exec,
         confirm: body.confirm,
       })
       : await applyIssueSplit({
         issueSplit,
+        issuePreviewId,
         execute: false,
       });
+
+    if (execute && result.ok) {
+      await registerCreatedBusinessIssues({
+        subscriptionStorePath,
+        issueSplit,
+        createdIssues: result.createdIssues ?? [],
+      });
+    }
 
     await appendAuditEvent(auditPath, {
       timestamp: new Date().toISOString(),
@@ -1006,6 +1072,7 @@ async function handleIssueSplitApply({ request, response, auditPath, cliPath, ex
       status: result.ok ? (execute ? "success" : "planned") : "failed",
       mode: result.mode,
       issue_split_id: issueSplit?.id ?? "",
+      issue_preview_id: issuePreviewId,
       issue_count: issueSplit?.issues?.length ?? 0,
       created_issue_ids: result.createdIssues?.map((issue) => issue.id || issue.identifier).filter(Boolean) ?? [],
       operation_count: result.operations?.length ?? 0,
@@ -1022,6 +1089,7 @@ async function handleIssueSplitApply({ request, response, auditPath, cliPath, ex
       status: "blocked",
       mode: execute ? "execute" : "dry-run",
       issue_split_id: issueSplit?.id ?? "",
+      issue_preview_id: issuePreviewId,
       issue_count: issueSplit?.issues?.length ?? 0,
       error: message,
     });
@@ -1032,11 +1100,12 @@ async function handleIssueSplitApply({ request, response, auditPath, cliPath, ex
   }
 }
 
-async function applyIssueSplitWithGuiCli({ issueSplit, cliPath, exec, confirm }) {
+async function applyIssueSplitWithGuiCli({ issueSplit, issuePreviewId, cliPath, exec, confirm }) {
   const tempDir = await mkdtemp(join(tmpdir(), "multica-gui-issue-split-"));
   try {
     return await applyIssueSplit({
       issueSplit,
+      issuePreviewId,
       execute: true,
       confirm,
       exec: exec ?? createGuiCliExec({ cliPath }),
@@ -1049,6 +1118,60 @@ async function applyIssueSplitWithGuiCli({ issueSplit, cliPath, exec, confirm })
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+}
+
+async function handleIssueSubscriptionsList({ response, subscriptionStorePath }) {
+  const result = await listIssueSubscriptions({ storePath: subscriptionStorePath });
+  sendJson(response, 200, result);
+}
+
+async function handleIssueSubscriptionsSync({
+  request,
+  response,
+  auditPath,
+  subscriptionStorePath,
+  cliPath,
+  exec,
+}) {
+  const body = await readJsonBody(request);
+  try {
+    const result = await syncIssueSubscriptions({
+      storePath: subscriptionStorePath,
+      exec: exec ?? createGuiCliExec({ cliPath }),
+      preferredIssueIds: Array.isArray(body.preferredIssueIds) ? body.preferredIssueIds : [],
+      limit: body.limit,
+    });
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "issue_subscriptions_synced",
+      status: "success",
+      synced_count: result.synced.length,
+      skipped_count: result.skipped.length,
+      warning: result.warning,
+    });
+    sendJson(response, 200, result);
+  } catch (error) {
+    const message = error.message || String(error);
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "issue_subscriptions_synced",
+      status: "failed",
+      error: message,
+    });
+    sendJson(response, 500, { ok: false, error: message });
+  }
+}
+
+async function handleIssueSubscriptionState({ response, subscriptionStorePath, id, state }) {
+  const result = await setIssueSubscriptionState({ storePath: subscriptionStorePath, id, state });
+  sendJson(response, 200, result);
+}
+
+async function handleIssueSubscriptionDelete({ response, subscriptionStorePath, id }) {
+  const result = await deleteIssueSubscription({ storePath: subscriptionStorePath, id });
+  sendJson(response, 200, result);
 }
 
 async function handleLlmProviders({
@@ -1202,6 +1325,7 @@ async function handlePlanSplit({
   request,
   response,
   auditPath,
+  subscriptionStorePath,
   cliPath,
   assistExec,
   llmProviderConfig,
@@ -1279,6 +1403,14 @@ async function handlePlanSplit({
         sendJson(response, 200, start);
         return;
       }
+      await registerIssueSubscriptionFromAssist({
+        subscriptionStorePath,
+        kind: "assist_plan_split",
+        source: "plan_split",
+        assist: start.assist,
+        title: `Plan 拆分 Assist Issue · ${body.goal?.title || body.goal?.id || "未命名目标"}`,
+        goalId: body.goal?.id ?? "",
+      });
       await appendAuditEvent(auditPath, {
         timestamp: new Date().toISOString(),
         source: "gui-server",
@@ -1519,6 +1651,64 @@ async function handleTeamPresetCreate({ request, response, sessionTeamPresets })
   });
   sessionTeamPresets.push(preset);
   sendJson(response, 201, { ok: true, preset });
+}
+
+async function registerIssueSubscriptionFromAssist({
+  subscriptionStorePath,
+  kind,
+  source,
+  assist,
+  title,
+  goalId,
+}) {
+  const issue = assist?.issue ?? {};
+  const issueId = String(issue.id ?? issue.identifier ?? "");
+  if (!issueId) return null;
+  return await registerIssueSubscription({
+    storePath: subscriptionStorePath,
+    subscription: {
+      kind,
+      issueId,
+      issueIdentifier: issue.identifier ?? "",
+      title: issue.title || title,
+      goalId,
+      source,
+      lastKnownStatus: issue.status ?? "",
+    },
+  });
+}
+
+async function registerCreatedBusinessIssues({
+  subscriptionStorePath,
+  issueSplit,
+  createdIssues,
+}) {
+  const issues = Array.isArray(issueSplit?.issues) ? issueSplit.issues : [];
+  const issueByPreviewId = new Map(issues.map((issue) => [String(issue.id ?? ""), issue]));
+  const results = [];
+  for (const created of createdIssues ?? []) {
+    const issuePreviewId = String(created.issuePreviewId ?? "");
+    const preview = issueByPreviewId.get(issuePreviewId) ?? {};
+    const issueId = String(created.id ?? created.identifier ?? "");
+    if (!issueId) continue;
+    const metadata = preview.metadata ?? created.metadata ?? {};
+    results.push(await registerIssueSubscription({
+      storePath: subscriptionStorePath,
+      subscription: {
+        kind: "business_issue",
+        issueId,
+        issueIdentifier: created.identifier ?? "",
+        title: created.title || preview.title || "业务 Issue",
+        goalId: metadata.goal_id ?? "",
+        planSetId: metadata.plan_set_id ?? "",
+        subplanId: metadata.subplan_id ?? "",
+        issueSplitId: issueSplit?.id ?? "",
+        source: "business_issue_apply",
+        lastKnownStatus: created.status ?? "",
+      },
+    }));
+  }
+  return results;
 }
 
 function listSessionPresets(sessionTeamPresets) {

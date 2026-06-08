@@ -268,6 +268,139 @@ test("gui server applies business issue split only with explicit confirmation", 
   }
 });
 
+test("gui server applies a single business issue candidate and registers its subscription", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-single-issue-apply-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const subscriptionStorePath = join(dir, "issue-subscriptions.json");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      subscriptionStorePath,
+      exec: async (args) => {
+        calls.push(args);
+        if (args[0] === "issue" && args[1] === "create") {
+          return jsonResult({ id: "created-2", identifier: "SPA-202", title: args[args.indexOf("--title") + 1], status: "todo" });
+        }
+        if (args[0] === "issue" && args[1] === "metadata" && args[2] === "set") {
+          return jsonResult({ ok: true });
+        }
+        throw new Error(`unexpected ${args.join(" ")}`);
+      },
+    });
+
+    try {
+      const issueSplit = sampleIssueSplit();
+      const response = await fetch(`http://127.0.0.1:${server.port}/api/plan/apply-issues`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          issueSplit,
+          issuePreviewId: "issue-preview-2",
+          execute: true,
+          confirm: "APPLY-MULTICA-ISSUE-SPLIT",
+        }),
+      });
+
+      assert.equal(response.status, 200);
+      const payload = await response.json();
+      assert.equal(payload.ok, true);
+      assert.deepEqual(payload.result.createdIssues.map((issue) => issue.issuePreviewId), ["issue-preview-2"]);
+      assert.equal(calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
+
+      const listResponse = await fetch(`http://127.0.0.1:${server.port}/api/issue-subscriptions`);
+      const listPayload = await listResponse.json();
+      assert.equal(listPayload.ok, true);
+      assert.equal(listPayload.subscriptions.length, 1);
+      assert.equal(listPayload.subscriptions[0].kind, "business_issue");
+      assert.equal(listPayload.subscriptions[0].issueId, "created-2");
+      assert.equal(listPayload.subscriptions[0].issueSplitId, issueSplit.id);
+      assert.equal(listPayload.subscriptions[0].subplanId, "subplan-2");
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("gui server subscription sync uses read-only issue commands and exposes grouped state", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-subscriptions-sync-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const subscriptionStorePath = join(dir, "issue-subscriptions.json");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      subscriptionStorePath,
+      exec: async (args) => {
+        calls.push(args);
+        if (args[0] === "issue" && args[1] === "create") {
+          return jsonResult({ id: "business-1", identifier: "SPA-301", title: args[args.indexOf("--title") + 1], status: "todo" });
+        }
+        if (args[0] === "issue" && args[1] === "metadata" && args[2] === "set") {
+          return jsonResult({ ok: true });
+        }
+        if (args.join(" ") === "issue list --output json") {
+          return jsonResult([{ id: "business-1", identifier: "SPA-301", title: "业务 Issue", status: "in_progress" }]);
+        }
+        if (args.join(" ") === "issue runs business-1 --output json") {
+          return jsonResult([{ id: "run-business-1", status: "running" }]);
+        }
+        if (args.join(" ") === "issue comment list business-1 --output json") {
+          return jsonResult([{ id: "comment-1", content: "正在处理业务 Issue，token=secret-value" }]);
+        }
+        throw new Error(`unexpected ${args.join(" ")}`);
+      },
+    });
+
+    try {
+      const issueSplit = {
+        ...sampleIssueSplit(),
+        issues: [sampleIssueSplit().issues[0]],
+      };
+      const apply = await fetch(`http://127.0.0.1:${server.port}/api/plan/apply-issues`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ issueSplit, execute: true, confirm: "APPLY-MULTICA-ISSUE-SPLIT" }),
+      });
+      assert.equal(apply.status, 200);
+
+      const sync = await fetch(`http://127.0.0.1:${server.port}/api/issue-subscriptions/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ preferredIssueIds: ["business-1"] }),
+      });
+      assert.equal(sync.status, 200);
+      const syncPayload = await sync.json();
+      assert.equal(syncPayload.ok, true);
+      assert.equal(syncPayload.synced[0].lastKnownStatus, "in_progress");
+      assert.equal(syncPayload.synced[0].lastRunStatus, "running");
+      assert.equal(syncPayload.synced[0].lastCommentExcerpt.includes("secret-value"), false);
+      assert.deepEqual(
+        calls.filter((args) => args[0] === "issue").map((args) => args.slice(0, 3)).filter((parts) => parts[1] !== "create" && parts[1] !== "metadata"),
+        [
+          ["issue", "list", "--output"],
+          ["issue", "runs", "business-1"],
+          ["issue", "comment", "list"],
+        ],
+      );
+
+      const auditEvents = (await readFile(auditPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      assert.equal(auditEvents.at(-1).event_type, "issue_subscriptions_synced");
+      assert.equal(JSON.stringify(auditEvents).includes("secret-value"), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("gui server normalizes a goal through LLM with a mock provider", async () => {
   const dir = await mkdtemp(join(tmpdir(), "multica-gui-goal-llm-"));
   try {

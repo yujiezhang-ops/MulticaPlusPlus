@@ -3,7 +3,9 @@
 
   const WORKFLOW_STORAGE_KEY = "multica-plusplus.workflow.v1";
   const ASSIST_POLL_INTERVAL_MS = 60000;
+  const ISSUE_SUBSCRIPTION_POLL_INTERVAL_MS = 60000;
   let assistSubscription = null;
+  let issueSubscriptionTimer = null;
 
   const mockData = {
     project: "MulticaPlusPlus",
@@ -273,6 +275,9 @@
     issueApplyStatus: "idle",
     issueApplyResult: null,
     issueApplyError: "",
+    issueSubscriptions: [],
+    issueSubscriptionStatus: "未同步",
+    issueSubscriptionWarning: "",
     goalPlanStatus: "草稿",
     goalPlanFeedback: "先澄清并锁定 Goal；锁定后生成 Plan；Issue 只是 Plan 后的拆分预览。",
     goalPlanComplexity: "medium",
@@ -349,6 +354,9 @@
         "issueApplyStatus",
         "issueApplyResult",
         "issueApplyError",
+        "issueSubscriptions",
+        "issueSubscriptionStatus",
+        "issueSubscriptionWarning",
         "goalPlanStatus",
         "goalPlanFeedback",
         "goalPlanComplexity",
@@ -383,6 +391,9 @@
         issueApplyStatus: state.issueApplyStatus,
         issueApplyResult: state.issueApplyResult,
         issueApplyError: state.issueApplyError,
+        issueSubscriptions: state.issueSubscriptions,
+        issueSubscriptionStatus: state.issueSubscriptionStatus,
+        issueSubscriptionWarning: state.issueSubscriptionWarning,
         goalPlanStatus: state.goalPlanStatus,
         goalPlanFeedback: state.goalPlanFeedback,
         goalPlanComplexity: state.goalPlanComplexity,
@@ -654,6 +665,45 @@
           command.appendChild(el("code", "", operation.displayCommand));
           item.appendChild(command);
         }
+        const issueActions = el("div", "issue-card-actions");
+        const createdIssue = createdIssueForPreview(issue.id);
+        if (createdIssue) {
+          issueActions.appendChild(el("span", "config-status", `已创建 ${createdIssue.identifier || createdIssue.id}`));
+          const open = el("button", "outline-button compact-button");
+          open.type = "button";
+          open.setAttribute("data-action", "open-issue");
+          open.setAttribute("data-issue-id", createdIssue.id || "");
+          open.setAttribute("data-issue-identifier", createdIssue.identifier || "");
+          open.appendChild(makeIcon("arrow"));
+          open.appendChild(el("span", "", "打开 Issue"));
+          issueActions.appendChild(open);
+          const copyId = el("button", "outline-button compact-button");
+          copyId.type = "button";
+          copyId.setAttribute("data-action", "copy-issue-id");
+          copyId.setAttribute("data-copy-value", createdIssue.identifier || createdIssue.id || "");
+          copyId.appendChild(makeIcon("copy"));
+          copyId.appendChild(el("span", "", "复制 Issue ID"));
+          issueActions.appendChild(copyId);
+        } else {
+          const createOne = el("button", "outline-button compact-button");
+          createOne.type = "button";
+          createOne.disabled = state.issueApplyStatus === "creating";
+          createOne.setAttribute("data-action", "apply-single-issue");
+          createOne.setAttribute("data-issue-preview-id", issue.id);
+          createOne.appendChild(makeIcon("plus"));
+          createOne.appendChild(el("span", "", "创建此 Issue"));
+          issueActions.appendChild(createOne);
+        }
+        if (operation?.displayCommand) {
+          const copy = el("button", "outline-button compact-button");
+          copy.type = "button";
+          copy.setAttribute("data-action", "copy-command");
+          copy.setAttribute("data-copy-value", operation.displayCommand);
+          copy.appendChild(makeIcon("copy"));
+          copy.appendChild(el("span", "", "复制命令"));
+          issueActions.appendChild(copy);
+        }
+        item.appendChild(issueActions);
         list.appendChild(item);
       });
       previewCard.appendChild(list);
@@ -682,7 +732,7 @@
       create.disabled = state.issueApplyStatus === "creating";
       create.setAttribute("data-action", "apply-issue-split");
       create.appendChild(makeIcon("plus"));
-      create.appendChild(el("span", "", state.issueApplyStatus === "creating" ? "创建中" : "创建 Multica Issue"));
+      create.appendChild(el("span", "", state.issueApplyStatus === "creating" ? "创建中" : "创建全部 Multica Issue"));
       actionRow.appendChild(create);
       section.appendChild(actionRow);
       section.appendChild(el("p", "setting-help", `必须输入 ${token}`));
@@ -698,6 +748,37 @@
       section.appendChild(created);
     }
     return section;
+  }
+
+  function createdIssueForPreview(issuePreviewId) {
+    const created = state.issueApplyResult?.createdIssues || [];
+    return created.find((issue) => issue.issuePreviewId === issuePreviewId)
+      || state.issueSplit?.issues?.find((issue) => issue.id === issuePreviewId)?.createdIssue
+      || null;
+  }
+
+  function mergeIssueApplyResult(result) {
+    const existing = state.issueApplyResult || {
+      ok: true,
+      mode: result?.mode || "execute",
+      issueSplitId: result?.issueSplitId || state.issueSplit?.id || "",
+      createdIssues: [],
+      operations: [],
+      warnings: [],
+    };
+    const byPreview = new Map((existing.createdIssues || []).map((issue) => [issue.issuePreviewId || issue.id || issue.identifier, issue]));
+    (result?.createdIssues || []).forEach((issue) => {
+      byPreview.set(issue.issuePreviewId || issue.id || issue.identifier, issue);
+      const preview = state.issueSplit?.issues?.find((item) => item.id === issue.issuePreviewId);
+      if (preview) preview.createdIssue = issue;
+    });
+    state.issueApplyResult = {
+      ...existing,
+      ...result,
+      createdIssues: Array.from(byPreview.values()),
+      operations: [...(existing.operations || []), ...(result?.operations || [])],
+      warnings: [...(existing.warnings || []), ...(result?.warnings || [])],
+    };
   }
 
   function renderAssistRunSummary(assist) {
@@ -808,6 +889,16 @@
           meta.appendChild(el("dd", "", value));
         });
         card.appendChild(meta);
+        const issueStatus = businessSubscriptionForSubplan(plan.id);
+        if (issueStatus) {
+          const tracking = el("section", "sub-plan-issue-status");
+          tracking.appendChild(el("span", "section-label", "绑定业务 Issue"));
+          tracking.appendChild(el("p", "", `${issueStatus.issueIdentifier || issueStatus.issueId} · ${issueStatus.lastKnownStatus || issueStatus.state || "active"} · Run ${issueStatus.lastRunStatus || "未同步"}`));
+          if (issueStatus.lastCommentExcerpt) {
+            tracking.appendChild(el("p", "setting-help", issueStatus.lastCommentExcerpt));
+          }
+          card.appendChild(tracking);
+        }
         if (plan.steps?.length) {
           const steps = el("ol", "sub-plan-steps");
           plan.steps.forEach((step) => {
@@ -822,6 +913,7 @@
     if (state.issueSplit) {
       planBuilder.appendChild(renderIssueSplitPreview());
     }
+    planBuilder.appendChild(renderIssueSubscriptionTracker());
     target.appendChild(planBuilder);
 
     const toolbar = el("div", "plan-toolbar");
@@ -1406,6 +1498,84 @@
     setPressed();
   }
 
+  function businessSubscriptionForSubplan(subplanId) {
+    return (state.issueSubscriptions || []).find((subscription) => (
+      subscription.kind === "business_issue" && subscription.subplanId === subplanId
+    ));
+  }
+
+  function renderIssueSubscriptionTracker() {
+    const section = el("section", "issue-subscription-card");
+    const header = el("div", "split-header");
+    header.appendChild(el("h3", "", "Issue 执行跟踪"));
+    header.appendChild(el("span", "config-status", state.issueSubscriptionStatus || "未同步"));
+    section.appendChild(header);
+    const subscriptions = state.issueSubscriptions || [];
+    const summary = summarizeSubscriptions(subscriptions);
+    const summaryRow = el("div", "subscription-summary-grid");
+    [
+      ["Assist Goal", summary.assist_goal],
+      ["Assist Plan", summary.assist_plan_split],
+      ["Business Issues", summary.business_issue],
+      ["Active", summary.active],
+      ["Paused", summary.paused],
+      ["Completed", summary.completed],
+      ["Error", summary.error],
+    ].forEach(([label, count]) => {
+      const item = el("div", "subscription-summary-item");
+      item.appendChild(el("span", "section-label", label));
+      item.appendChild(el("strong", "", String(count)));
+      summaryRow.appendChild(item);
+    });
+    section.appendChild(summaryRow);
+    if (state.issueSubscriptionWarning) {
+      section.appendChild(el("p", "goal-feedback", state.issueSubscriptionWarning));
+    }
+    if (!subscriptions.length) {
+      section.appendChild(el("p", "setting-help", "暂无订阅。Goal 澄清 Assist Issue、Plan 拆分 Assist Issue 和业务 Issue 创建成功后会进入这里。"));
+      return section;
+    }
+    const groups = [
+      ["assist_goal", "Assist Goal"],
+      ["assist_plan_split", "Assist Plan"],
+      ["business_issue", "Business Issues"],
+    ];
+    groups.forEach(([kind, label]) => {
+      const groupItems = subscriptions.filter((item) => item.kind === kind);
+      if (!groupItems.length) return;
+      const group = el("section", "subscription-group");
+      group.appendChild(el("h4", "", label));
+      const list = el("ul", "created-issue-list");
+      groupItems.slice(0, 6).forEach((subscription) => {
+        const item = el("li", "", `${subscription.issueIdentifier || subscription.issueId} · ${subscription.title || label} · ${subscription.state || "active"} · ${subscription.lastKnownStatus || "未同步"}${subscription.lastRunStatus ? ` · Run ${subscription.lastRunStatus}` : ""}`);
+        if (subscription.lastCommentExcerpt) {
+          item.appendChild(el("span", "subscription-comment", ` · ${subscription.lastCommentExcerpt}`));
+        }
+        list.appendChild(item);
+      });
+      group.appendChild(list);
+      section.appendChild(group);
+    });
+    return section;
+  }
+
+  function summarizeSubscriptions(subscriptions) {
+    return subscriptions.reduce((acc, item) => {
+      acc[item.kind] = (acc[item.kind] || 0) + 1;
+      acc[item.state] = (acc[item.state] || 0) + 1;
+      if (item.error) acc.error += 1;
+      return acc;
+    }, {
+      assist_goal: 0,
+      assist_plan_split: 0,
+      business_issue: 0,
+      active: 0,
+      paused: 0,
+      completed: 0,
+      error: 0,
+    });
+  }
+
   function savePendingAssist(pending) {
     stopAssistSubscription();
     state.pendingAssist = pending;
@@ -1652,6 +1822,14 @@
         previewIssueSplit();
       } else if (kind === "apply-issue-split") {
         applyIssueSplit();
+      } else if (kind === "apply-single-issue") {
+        applyIssueSplit(action.getAttribute("data-issue-preview-id") || "");
+      } else if (kind === "copy-command" || kind === "copy-issue-id") {
+        copyText(action.getAttribute("data-copy-value") || "");
+        appendRecord(kind === "copy-command" ? "Issue 创建命令已复制" : "Issue ID 已复制", action.getAttribute("data-copy-value") || "无内容");
+      } else if (kind === "open-issue") {
+        const issueId = action.getAttribute("data-issue-identifier") || action.getAttribute("data-issue-id") || "";
+        appendRecord("打开 Issue", `请在 Multica 中查看 ${issueId}。`);
       } else if (kind === "split-plan-llm") {
         splitPlanWithLlm();
       } else if (kind === "preview-selected-preset") {
@@ -1917,7 +2095,7 @@
     }
   }
 
-  async function applyIssueSplit() {
+  async function applyIssueSplit(issuePreviewId = "") {
     if (!state.issueSplit || state.issueApplyStatus === "creating") return;
     const token = state.issueSplit.confirmationToken || "APPLY-MULTICA-ISSUE-SPLIT";
     const confirmInputValue = qs("#issue-split-confirm")?.value ?? state.issueApplyConfirm;
@@ -1940,6 +2118,7 @@
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           issueSplit: state.issueSplit,
+          issuePreviewId,
           execute: true,
           confirm: confirmInputValue
         })
@@ -1949,12 +2128,13 @@
         throw new Error(payload.error || payload.result?.error || "Issue create failed.");
       }
       state.issueApplyStatus = "created";
-      state.issueApplyResult = payload.result;
+      mergeIssueApplyResult(payload.result);
       state.issueApplyError = "";
       state.goalPlanStatus = "Issue 已创建";
       state.goalPlanFeedback = `已创建 ${payload.result.createdIssues?.length || 0} 个业务 Multica Issue。`;
       persistWorkflowDraft();
       appendRecord("业务 Issue 已创建", `${payload.result.createdIssues?.map((issue) => issue.identifier || issue.id).filter(Boolean).join(", ") || "无返回 id"}。`);
+      await loadIssueSubscriptions({ sync: true, immediate: true });
       renderAll();
     } catch (error) {
       state.issueApplyStatus = "failed";
@@ -2287,6 +2467,77 @@
     return detail ? `${base} 错误摘要：${detail}` : base;
   }
 
+  async function loadIssueSubscriptions({ sync = false, immediate = false } = {}) {
+    try {
+      const response = await fetch(sync ? "/api/issue-subscriptions/sync" : "/api/issue-subscriptions", sync
+        ? {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            preferredIssueIds: visibleIssueIds(),
+            limit: 30
+          })
+        }
+        : undefined);
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "issue subscription load failed");
+      mergeIssueSubscriptions(sync ? (payload.synced || []) : (payload.subscriptions || []));
+      if (payload.warning === "subscription_sync_limited") {
+        state.issueSubscriptionWarning = "当前订阅过多，仅同步前 30 个活跃 Issue；其余已降频。";
+      } else if (!payload.skipped?.length) {
+        state.issueSubscriptionWarning = "";
+      }
+      state.issueSubscriptionStatus = sync ? "已同步" : "已加载";
+      persistWorkflowDraft();
+      renderAll();
+      scheduleIssueSubscriptionSync();
+    } catch (error) {
+      state.issueSubscriptionStatus = "同步失败";
+      state.issueSubscriptionWarning = error.message || String(error);
+      if (immediate) renderAll();
+    }
+  }
+
+  function scheduleIssueSubscriptionSync() {
+    if (issueSubscriptionTimer) {
+      clearTimeout(issueSubscriptionTimer);
+    }
+    issueSubscriptionTimer = setTimeout(() => {
+      loadIssueSubscriptions({ sync: true });
+    }, ISSUE_SUBSCRIPTION_POLL_INTERVAL_MS);
+    if (issueSubscriptionTimer?.unref) {
+      issueSubscriptionTimer.unref();
+    }
+  }
+
+  function mergeIssueSubscriptions(items) {
+    const byId = new Map((state.issueSubscriptions || []).map((item) => [item.id || item.issueId, item]));
+    (items || []).forEach((item) => {
+      byId.set(item.id || item.issueId, { ...(byId.get(item.id || item.issueId) || {}), ...item });
+    });
+    state.issueSubscriptions = Array.from(byId.values());
+  }
+
+  function visibleIssueIds() {
+    const ids = new Set();
+    (state.issueSubscriptions || []).forEach((item) => {
+      if (item.issueId) ids.add(item.issueId);
+    });
+    (state.issueApplyResult?.createdIssues || []).forEach((item) => {
+      if (item.id) ids.add(item.id);
+    });
+    if (state.pendingAssist?.issueId) ids.add(state.pendingAssist.issueId);
+    return Array.from(ids);
+  }
+
+  function copyText(value) {
+    const text = String(value || "");
+    const clipboard = window?.navigator?.clipboard;
+    if (clipboard?.writeText) {
+      clipboard.writeText(text).catch(() => {});
+    }
+  }
+
   async function createImage2Agent() {
     const preset = currentAgentPreset();
     if (state.agentConfigStatus === "创建中") {
@@ -2474,6 +2725,7 @@
     if (shell) shell.setAttribute("data-prototype", "visual-mock");
     bindEvents();
     await loadPresetLibrary();
+    await loadIssueSubscriptions({ sync: false });
     renderAll();
     if (state.pendingAssist?.issueId) {
       subscribeToPendingAssist();

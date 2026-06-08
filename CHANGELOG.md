@@ -49,6 +49,16 @@ once public releases are cut.
 - Added the GUI business `Plan/PlanSet -> Issue preview -> confirmed Issue
   create` flow, including `/api/plan/apply-issues`, confirmation token gating,
   created issue result display, and browser-local recovery of the preview.
+- Added a local Issue subscription table for Goal assist issues, Plan split
+  assist issues, and created business issues. The GUI server stores it under
+  `out/issue-subscriptions.json`, exposes aggregate sync APIs, and syncs only
+  through read-only Multica issue/list/runs/comment commands.
+- Added per-candidate business Issue creation from the GUI preview cards,
+  including `创建此 Issue`, copy-command, open/copy-created-id controls, and
+  batch creation that skips candidates already created in the current preview.
+- Rewrote the root `README.md` as a Chinese-first quick-start user manual for
+  the GUI Goal -> Plan -> Issue workflow, subscription tracking, CLI commands,
+  and write-safety boundaries.
 
 ### Changed
 
@@ -74,6 +84,9 @@ once public releases are cut.
   results, and finalizes the local Goal/PlanSet only after JSON is readable.
 - Changed PlanSet handling so `预览业务 Issue` maps each parallel sub-plan to
   one business Issue candidate before any Multica write is allowed.
+- Changed PlanSet business Issue descriptions to carry the locked Goal context,
+  subPlan objective/workstream/agent/dependencies/steps/acceptance evidence, and
+  fixed safety boundaries instead of a generic Goal/Plan template.
 - Changed deterministic Plan, issue preview summaries/descriptions, and
   Goal/Plan review Markdown to render in the requested language while keeping
   JSON keys and schemas stable.
