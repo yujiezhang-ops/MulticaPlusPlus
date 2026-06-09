@@ -1346,7 +1346,14 @@ test("GUI records workflow snapshots and manages subscribed issue rows", async (
   const newFlow = document.querySelector("[data-action='new-workflow']");
   newFlow.dispatchEvent({ type: "click", target: newFlow });
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.ok(storage.getItem("multica-plusplus.workflow.v1").includes("实现 Goal Plan 模块"));
+  assert.ok(document.querySelector("#goal-summary").textContentDeep().includes("尚未澄清 Goal"));
+  assert.ok(document.querySelector("#goal-summary").textContentDeep().includes("新流程"));
+  assert.equal(document.querySelector("#goal-summary").textContentDeep().includes("交付 GUI-first 的 Multica++ 控制台"), false);
+  assert.equal(document.querySelector("#goal-request-input").value, "");
+  const currentDraft = JSON.parse(storage.getItem("multica-plusplus.workflow.v1"));
+  assert.equal(currentDraft.goalRequest, "");
+  assert.equal(currentDraft.normalizedGoal, null);
+  assert.equal(currentDraft.lockedGoal, null);
   assert.ok(storage.getItem("multica-plusplus.workflow-records.v1").includes("历史 Goal"));
 
   recordsNav.dispatchEvent({ type: "click", target: recordsNav });

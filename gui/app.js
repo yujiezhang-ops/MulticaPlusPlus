@@ -670,7 +670,7 @@
   function resetCurrentWorkflow() {
     saveCurrentWorkflowRecord("new-workflow");
     state.workflowId = newWorkflowId();
-    state.goalRequest = "实现 Goal Plan 模块，复杂任务可以拆成一个或多个 Multica issue";
+    state.goalRequest = "";
     state.normalizedGoal = null;
     state.lockedGoal = null;
     state.generatedPlan = null;
@@ -858,11 +858,16 @@
 
   function renderGoalSummaryCard() {
     const card = el("section", "goal-summary-card");
-    const goal = state.lockedGoal || state.normalizedGoal || mockData.goal;
-    const statusText = goalStatusLabel(state.lockedGoal?.status || state.normalizedGoal?.status || mockData.goal.status);
-    const ownerText = state.lockedGoal?.owner || state.normalizedGoal?.owner || mockData.goal.owner;
-    const objective = state.lockedGoal?.objective || state.normalizedGoal?.objective || mockData.goal.objective;
-    const criteria = state.normalizedGoal?.successCriteria || state.lockedGoal?.successCriteria || [];
+    const goal = state.lockedGoal || state.normalizedGoal || null;
+    const hasGoal = Boolean(goal);
+    const statusText = hasGoal ? goalStatusLabel(goal.status) : "待澄清";
+    const ownerText = hasGoal ? (goal.owner || "未指定") : "未指定";
+    const objective = hasGoal ? (goal.objective || goal.title || "待补充目标") : "尚未澄清 Goal";
+    const criteria = hasGoal ? (goal.successCriteria || []) : [];
+    const progressValue = hasGoal ? mockData.goal.progress : 0;
+    const completedSteps = hasGoal ? mockData.goal.completedSteps : 0;
+    const totalSteps = mockData.goal.totalSteps;
+    const savedText = hasGoal ? mockData.goal.lastSaved : "新流程";
 
     const header = el("div", "goal-summary-header");
     header.appendChild(el("span", "section-label", "当前目标"));
@@ -876,8 +881,8 @@
     const facts = el("div", "goal-summary-facts");
     [
       ["负责人", ownerText],
-      ["进度", `${mockData.goal.completedSteps}/${mockData.goal.totalSteps} 步 · ${mockData.goal.progress}%`],
-      ["保存", mockData.goal.lastSaved],
+      ["进度", `${completedSteps}/${totalSteps} 步 · ${progressValue}%`],
+      ["保存", savedText],
     ].forEach(([label, value]) => {
       const item = el("div", "goal-summary-fact");
       item.appendChild(el("span", "", label));
@@ -888,9 +893,16 @@
 
     const progress = el("div", "progress-track goal-summary-progress");
     const fill = el("span", "progress-fill");
-    fill.style.width = `${mockData.goal.progress}%`;
+    fill.style.width = `${progressValue}%`;
     progress.appendChild(fill);
     card.appendChild(progress);
+
+    if (!hasGoal) {
+      const empty = el("section", "goal-empty-state");
+      empty.appendChild(el("p", "", "输入目标需求后点击“澄清目标”，这里会显示可锁定的 Goal 摘要。"));
+      card.appendChild(empty);
+      return card;
+    }
 
     if (criteria.length) {
       const preview = el("section", "goal-criteria-preview");
@@ -909,7 +921,12 @@
 
   function renderGoalDetailDisclosure() {
     return renderCollapsibleDetails("展开目标详情", (content) => {
-      const criteria = state.normalizedGoal?.successCriteria || state.lockedGoal?.successCriteria || [];
+      const goal = state.lockedGoal || state.normalizedGoal || null;
+      const criteria = goal?.successCriteria || [];
+      if (!goal) {
+        content.appendChild(el("p", "setting-help", "当前流程还没有澄清出的 Goal。提交目标后会显示成功标准、最近更新和目标历史入口。"));
+        return;
+      }
       if (criteria.length) {
         content.appendChild(configList("完整成功标准", criteria));
       }
@@ -921,7 +938,7 @@
       updateHeader.appendChild(el("h3", "", "最近更新"));
       updateHeader.appendChild(el("span", "config-status", mockData.goal.latestUpdateTime));
       update.appendChild(updateHeader);
-      update.appendChild(el("p", "", state.normalizedGoal?.title || mockData.goal.latestUpdate));
+      update.appendChild(el("p", "", goal.title || goal.objective || "目标已更新。"));
       content.appendChild(update);
       const history = el("button", "full-row-button compact-history-button");
       history.type = "button";
