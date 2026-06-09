@@ -2,9 +2,12 @@
   "use strict";
 
   const WORKFLOW_STORAGE_KEY = "multica-plusplus.workflow.v1";
+  const WORKFLOW_RECORDS_STORAGE_KEY = "multica-plusplus.workflow-records.v1";
+  const HIDDEN_SUBSCRIPTIONS_STORAGE_KEY = "multica-plusplus.hidden-subscriptions.v1";
+  const CLOSE_SUBSCRIPTION_CONFIRMATION_TOKEN = "CLOSE-MULTICA-SUBSCRIBED-ISSUE";
   const ASSIST_POLL_INTERVAL_MS = 60000;
   const ISSUE_SUBSCRIPTION_POLL_INTERVAL_MS = 60000;
-  let assistSubscription = null;
+  const assistSubscriptions = new Map();
   let issueSubscriptionTimer = null;
 
   const mockData = {
@@ -259,16 +262,19 @@
 
   const state = {
     activeView: "control",
+    contentHidden: false,
     planFilter: "all",
     templateId: "backend",
     ttl: "2 小时",
     language: "zh-CN",
+    workflowId: newWorkflowId(),
     goalRequest: "实现 Goal Plan 模块，复杂任务可以拆成一个或多个 Multica issue",
     normalizedGoal: null,
     lockedGoal: null,
     generatedPlan: null,
     planSet: null,
     pendingAssist: null,
+    pendingAssists: [],
     llmProviders: null,
     issueSplit: null,
     issueApplyConfirm: "",
@@ -278,6 +284,11 @@
     issueSubscriptions: [],
     issueSubscriptionStatus: "未同步",
     issueSubscriptionWarning: "",
+    issueSubscriptionActionStatus: "",
+    subscriptionCloseConfirm: "",
+    hiddenSubscriptionIds: [],
+    workflowRecords: [],
+    goalClarificationAnswer: "",
     goalPlanStatus: "草稿",
     goalPlanFeedback: "先澄清并锁定 Goal；锁定后生成 Plan；Issue 只是 Plan 后的拆分预览。",
     goalPlanComplexity: "medium",
@@ -292,6 +303,8 @@
   };
 
   restoreWorkflowDraft();
+  restoreWorkflowRecords();
+  restoreHiddenSubscriptions();
 
   const viewIds = {
     control: "view-control",
@@ -343,6 +356,7 @@
       const draft = JSON.parse(raw);
       if (!draft || typeof draft !== "object" || draft.version !== 1) return;
       [
+        "workflowId",
         "language",
         "goalRequest",
         "normalizedGoal",
@@ -350,6 +364,7 @@
         "generatedPlan",
         "planSet",
         "pendingAssist",
+        "pendingAssists",
         "issueSplit",
         "issueApplyStatus",
         "issueApplyResult",
@@ -357,6 +372,7 @@
         "issueSubscriptions",
         "issueSubscriptionStatus",
         "issueSubscriptionWarning",
+        "goalClarificationAnswer",
         "goalPlanStatus",
         "goalPlanFeedback",
         "goalPlanComplexity",
@@ -365,6 +381,13 @@
           state[field] = draft[field];
         }
       });
+      state.workflowId = String(state.workflowId || draft.workflowId || newWorkflowId());
+      const pendingItems = Array.isArray(draft.pendingAssists) ? draft.pendingAssists : [];
+      if (draft.pendingAssist?.issueId) pendingItems.push(draft.pendingAssist);
+      state.pendingAssists = pendingItems
+        .map((pending) => normalizePendingAssist(pending, pending.workflowId || state.workflowId))
+        .filter(Boolean);
+      syncCurrentPendingAssist();
       if (draft.lastAssist) {
         mockData.llmAssist.lastAssist = draft.lastAssist;
       }
@@ -380,6 +403,7 @@
       storage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify({
         version: 1,
         savedAt: new Date().toISOString(),
+        workflowId: state.workflowId,
         language: state.language,
         goalRequest: state.goalRequest,
         normalizedGoal: state.normalizedGoal,
@@ -387,6 +411,7 @@
         generatedPlan: state.generatedPlan,
         planSet: state.planSet,
         pendingAssist: state.pendingAssist,
+        pendingAssists: state.pendingAssists,
         issueSplit: state.issueSplit,
         issueApplyStatus: state.issueApplyStatus,
         issueApplyResult: state.issueApplyResult,
@@ -394,10 +419,66 @@
         issueSubscriptions: state.issueSubscriptions,
         issueSubscriptionStatus: state.issueSubscriptionStatus,
         issueSubscriptionWarning: state.issueSubscriptionWarning,
+        goalClarificationAnswer: state.goalClarificationAnswer,
         goalPlanStatus: state.goalPlanStatus,
         goalPlanFeedback: state.goalPlanFeedback,
         goalPlanComplexity: state.goalPlanComplexity,
         lastAssist: mockData.llmAssist.lastAssist || null,
+      }));
+    } catch {
+      // localStorage can be unavailable in hardened browsers or file mode.
+    }
+  }
+
+  function restoreWorkflowRecords() {
+    const storage = browserStorage();
+    if (!storage) return;
+    try {
+      const raw = storage.getItem(WORKFLOW_RECORDS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const items = Array.isArray(parsed?.records) ? parsed.records : [];
+      state.workflowRecords = items.map(normalizeWorkflowRecord).filter(Boolean);
+    } catch {
+      storage.removeItem(WORKFLOW_RECORDS_STORAGE_KEY);
+    }
+  }
+
+  function persistWorkflowRecords() {
+    const storage = browserStorage();
+    if (!storage) return;
+    try {
+      storage.setItem(WORKFLOW_RECORDS_STORAGE_KEY, JSON.stringify({
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        records: state.workflowRecords.map(normalizeWorkflowRecord).filter(Boolean),
+      }));
+    } catch {
+      // localStorage can be unavailable in hardened browsers or file mode.
+    }
+  }
+
+  function restoreHiddenSubscriptions() {
+    const storage = browserStorage();
+    if (!storage) return;
+    try {
+      const raw = storage.getItem(HIDDEN_SUBSCRIPTIONS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      state.hiddenSubscriptionIds = Array.isArray(parsed?.ids) ? parsed.ids.map(String) : [];
+    } catch {
+      storage.removeItem(HIDDEN_SUBSCRIPTIONS_STORAGE_KEY);
+    }
+  }
+
+  function persistHiddenSubscriptions() {
+    const storage = browserStorage();
+    if (!storage) return;
+    try {
+      storage.setItem(HIDDEN_SUBSCRIPTIONS_STORAGE_KEY, JSON.stringify({
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        ids: state.hiddenSubscriptionIds.map(String),
       }));
     } catch {
       // localStorage can be unavailable in hardened browsers or file mode.
@@ -410,6 +491,10 @@
     } catch {
       return null;
     }
+  }
+
+  function newWorkflowId() {
+    return `workflow_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
   function stableHash(value) {
@@ -430,15 +515,206 @@
     return `assist_${kind}_${stableHash(seed || kind)}`;
   }
 
-  function stopAssistSubscription() {
-    if (!assistSubscription) return;
-    if (assistSubscription.eventSource) {
-      assistSubscription.eventSource.close();
+  function pendingAssistId(pending) {
+    if (pending?.id) return String(pending.id);
+    const seed = `${pending?.workflowId || state.workflowId}|${pending?.kind || "assist"}|${pending?.issueId || pending?.issueIdentifier || pending?.assistRequestId || stableHash(JSON.stringify(pending || {}))}`;
+    return `pending_${stableHash(seed)}`;
+  }
+
+  function normalizePendingAssist(pending, workflowId = state.workflowId) {
+    if (!pending || typeof pending !== "object" || !pending.issueId) return null;
+    const normalized = {
+      ...pending,
+      workflowId: String(pending.workflowId || workflowId || state.workflowId || newWorkflowId()),
+      status: pending.status || "active",
+      updatedAt: pending.updatedAt || pending.createdAt || new Date().toISOString(),
+    };
+    normalized.id = pendingAssistId(normalized);
+    return normalized;
+  }
+
+  function isActivePendingAssist(pending) {
+    return Boolean(pending?.issueId) && !["completed", "blocked", "cancelled"].includes(String(pending.status || "active"));
+  }
+
+  function pendingAssistsForWorkflow(workflowId = state.workflowId) {
+    return (state.pendingAssists || [])
+      .map((pending) => normalizePendingAssist(pending, workflowId))
+      .filter((pending) => pending && pending.workflowId === workflowId && isActivePendingAssist(pending));
+  }
+
+  function currentWorkflowPendingAssist() {
+    return pendingAssistsForWorkflow(state.workflowId)[0] || null;
+  }
+
+  function syncCurrentPendingAssist() {
+    state.pendingAssist = currentWorkflowPendingAssist();
+  }
+
+  function normalizeWorkflowRecord(record) {
+    if (!record || typeof record !== "object") return null;
+    const snapshot = record.snapshot && typeof record.snapshot === "object" ? record.snapshot : {};
+    const id = String(record.id || snapshot.workflowId || `workflow_${stableHash(JSON.stringify(snapshot) || Date.now())}`);
+    const workflowId = String(snapshot.workflowId || record.workflowId || id);
+    snapshot.workflowId = workflowId;
+    const snapshotPendingItems = Array.isArray(snapshot.pendingAssists) ? snapshot.pendingAssists : [];
+    if (snapshot.pendingAssist?.issueId) snapshotPendingItems.push(snapshot.pendingAssist);
+    snapshot.pendingAssists = snapshotPendingItems
+      .map((pending) => normalizePendingAssist(pending, pending.workflowId || workflowId))
+      .filter(Boolean);
+    snapshot.pendingAssist = snapshot.pendingAssists.find((pending) => pending.workflowId === workflowId && isActivePendingAssist(pending)) || null;
+    return {
+      id,
+      workflowId,
+      title: String(record.title || snapshot.lockedGoal?.title || snapshot.normalizedGoal?.title || snapshot.goalRequest || "未命名工作流"),
+      objective: String(record.objective || snapshot.lockedGoal?.objective || snapshot.normalizedGoal?.objective || ""),
+      createdAt: String(record.createdAt || record.updatedAt || new Date().toISOString()),
+      updatedAt: String(record.updatedAt || record.createdAt || new Date().toISOString()),
+      counts: {
+        plans: Number(record.counts?.plans ?? snapshot.planSet?.plans?.length ?? (snapshot.generatedPlan ? 1 : 0)),
+        issueCandidates: Number(record.counts?.issueCandidates ?? snapshot.issueSplit?.issues?.length ?? 0),
+        createdIssues: Number(record.counts?.createdIssues ?? snapshot.issueApplyResult?.createdIssues?.length ?? 0),
+        subscriptions: Number(record.counts?.subscriptions ?? snapshot.issueSubscriptions?.length ?? 0),
+      },
+      snapshot,
+    };
+  }
+
+  function currentWorkflowSnapshot() {
+    syncCurrentPendingAssist();
+    const workflowPendingAssists = pendingAssistsForWorkflow(state.workflowId);
+    return {
+      workflowId: state.workflowId,
+      language: state.language,
+      goalRequest: state.goalRequest,
+      normalizedGoal: state.normalizedGoal,
+      lockedGoal: state.lockedGoal,
+      generatedPlan: state.generatedPlan,
+      planSet: state.planSet,
+      pendingAssist: state.pendingAssist,
+      pendingAssists: workflowPendingAssists,
+      issueSplit: state.issueSplit,
+      issueApplyStatus: state.issueApplyStatus,
+      issueApplyResult: state.issueApplyResult,
+      issueApplyError: state.issueApplyError,
+      issueSubscriptions: state.issueSubscriptions,
+      issueSubscriptionStatus: state.issueSubscriptionStatus,
+      issueSubscriptionWarning: state.issueSubscriptionWarning,
+      goalPlanStatus: state.goalPlanStatus,
+      goalPlanFeedback: state.goalPlanFeedback,
+      goalPlanComplexity: state.goalPlanComplexity,
+      lastAssist: mockData.llmAssist.lastAssist || null,
+    };
+  }
+
+  function saveCurrentWorkflowRecord(reason = "manual") {
+    const snapshot = currentWorkflowSnapshot();
+    const title = snapshot.lockedGoal?.title || snapshot.normalizedGoal?.title || snapshot.goalRequest || "未命名工作流";
+    const objective = snapshot.lockedGoal?.objective || snapshot.normalizedGoal?.objective || "";
+    const now = new Date().toISOString();
+    const id = snapshot.workflowId || state.workflowId || `workflow_${stableHash(`${title}|${objective}|${now}`)}`;
+    const existing = state.workflowRecords.find((record) => record.id === id);
+    const next = normalizeWorkflowRecord({
+      ...(existing || {}),
+      id,
+      workflowId: snapshot.workflowId,
+      title,
+      objective,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      reason,
+      snapshot,
+    });
+    state.workflowRecords = [next, ...state.workflowRecords.filter((record) => record.id !== id)].slice(0, 30);
+    persistWorkflowRecords();
+    return next;
+  }
+
+  function applyWorkflowSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return;
+    [
+      "workflowId",
+      "language",
+      "goalRequest",
+      "normalizedGoal",
+      "lockedGoal",
+      "generatedPlan",
+      "planSet",
+      "pendingAssist",
+      "pendingAssists",
+      "issueSplit",
+      "issueApplyStatus",
+      "issueApplyResult",
+      "issueApplyError",
+      "issueSubscriptions",
+      "issueSubscriptionStatus",
+      "issueSubscriptionWarning",
+      "goalClarificationAnswer",
+      "goalPlanStatus",
+      "goalPlanFeedback",
+      "goalPlanComplexity",
+    ].forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(snapshot, field)) {
+        state[field] = snapshot[field];
+      }
+    });
+    state.workflowId = String(state.workflowId || snapshot.workflowId || newWorkflowId());
+    const snapshotPendingAssists = Array.isArray(snapshot.pendingAssists) ? snapshot.pendingAssists : [];
+    mergePendingAssists(snapshotPendingAssists.map((pending) => normalizePendingAssist(pending, pending.workflowId || state.workflowId)).filter(Boolean));
+    syncCurrentPendingAssist();
+    mockData.llmAssist.lastAssist = snapshot.lastAssist || null;
+    state.contentHidden = false;
+    persistWorkflowDraft();
+  }
+
+  function resetCurrentWorkflow() {
+    saveCurrentWorkflowRecord("new-workflow");
+    state.workflowId = newWorkflowId();
+    state.goalRequest = "实现 Goal Plan 模块，复杂任务可以拆成一个或多个 Multica issue";
+    state.normalizedGoal = null;
+    state.lockedGoal = null;
+    state.generatedPlan = null;
+    state.planSet = null;
+    state.pendingAssist = null;
+    state.issueSplit = null;
+    state.issueApplyConfirm = "";
+    state.issueApplyStatus = "idle";
+    state.issueApplyResult = null;
+    state.issueApplyError = "";
+    state.goalPlanStatus = "草稿";
+    state.goalPlanFeedback = "已创建新的空白流程。历史记录和订阅表仍保留。";
+    state.goalClarificationAnswer = "";
+    state.goalPlanComplexity = "medium";
+    mockData.llmAssist.lastAssist = null;
+    persistWorkflowDraft();
+  }
+
+  function mergePendingAssists(items) {
+    const byId = new Map((state.pendingAssists || []).map((pending) => [pendingAssistId(pending), normalizePendingAssist(pending, pending.workflowId)]));
+    (items || []).forEach((item) => {
+      const pending = normalizePendingAssist(item, item?.workflowId || state.workflowId);
+      if (!pending) return;
+      byId.set(pending.id, { ...(byId.get(pending.id) || {}), ...pending });
+    });
+    state.pendingAssists = Array.from(byId.values()).filter(Boolean);
+    syncCurrentPendingAssist();
+  }
+
+  function stopAssistSubscription(pendingOrId = "") {
+    if (!pendingOrId) {
+      assistSubscriptions.forEach((subscription) => {
+        subscription.eventSource?.close?.();
+        if (subscription.timer) clearTimeout(subscription.timer);
+      });
+      assistSubscriptions.clear();
+      return;
     }
-    if (assistSubscription.timer) {
-      clearTimeout(assistSubscription.timer);
-    }
-    assistSubscription = null;
+    const id = typeof pendingOrId === "string" ? pendingOrId : pendingAssistId(pendingOrId);
+    const subscription = assistSubscriptions.get(id);
+    if (!subscription) return;
+    subscription.eventSource?.close?.();
+    if (subscription.timer) clearTimeout(subscription.timer);
+    assistSubscriptions.delete(id);
   }
 
   function encodeQuery(params) {
@@ -499,6 +775,15 @@
     if (agent) agent.textContent = mockData.agent;
     if (runtime) runtime.textContent = mockData.runtime;
     if (status) status.textContent = mockData.runStatus;
+    const visibilityButton = qs("#toggle-content-visibility");
+    const visibilityLabel = qs("#content-visibility-label");
+    if (visibilityButton) {
+      visibilityButton.setAttribute("aria-pressed", state.contentHidden ? "true" : "false");
+      visibilityButton.setAttribute("aria-label", state.contentHidden ? "显示当前内容" : "隐藏当前内容");
+    }
+    if (visibilityLabel) {
+      visibilityLabel.textContent = state.contentHidden ? "显示内容" : "隐藏内容";
+    }
   }
 
   function renderGoal() {
@@ -530,6 +815,9 @@
     controls.appendChild(lock);
     builder.appendChild(controls);
     builder.appendChild(el("p", "goal-feedback", state.goalPlanFeedback));
+    if (state.normalizedGoal?.status === "draft") {
+      builder.appendChild(renderGoalClarificationFollowup());
+    }
     target.appendChild(builder);
 
     const objective = el("section", "goal-section");
@@ -632,6 +920,38 @@
     });
     wrapper.appendChild(path);
     return wrapper;
+  }
+
+  function renderGoalClarificationFollowup() {
+    const section = el("section", "goal-clarification-followup");
+    const header = el("div", "split-header");
+    header.appendChild(el("h3", "", "补充澄清信息"));
+    header.appendChild(el("span", "config-status", "需要澄清"));
+    section.appendChild(header);
+    section.appendChild(el("p", "goal-feedback", "当前 Goal 仍是草稿，请先补充澄清信息。"));
+    const questions = state.normalizedGoal?.clarificationQuestions || [];
+    if (questions.length) {
+      section.appendChild(configList("待澄清问题", questions));
+    }
+    const label = el("label", "preset-edit-field");
+    label.appendChild(el("span", "", "澄清补充说明"));
+    const textarea = el("textarea", "goal-clarification-answer");
+    textarea.id = "goal-clarification-answer";
+    textarea.rows = 4;
+    textarea.value = state.goalClarificationAnswer;
+    textarea.placeholder = "回答上方问题，例如实时性目标、回写位置、审查范围和失败反馈方式。";
+    label.appendChild(textarea);
+    section.appendChild(label);
+    const actions = el("div", "goal-action-row");
+    const submit = el("button", "primary-button");
+    submit.type = "button";
+    submit.disabled = state.goalPlanStatus === "澄清中";
+    submit.setAttribute("data-action", "submit-goal-clarification");
+    submit.appendChild(makeIcon("spark"));
+    submit.appendChild(el("span", "", state.goalPlanStatus === "澄清中" ? "提交中" : "提交补充澄清"));
+    actions.appendChild(submit);
+    section.appendChild(actions);
+    return section;
   }
 
   function renderIssueSplitPreview() {
@@ -913,7 +1233,7 @@
     if (state.issueSplit) {
       planBuilder.appendChild(renderIssueSplitPreview());
     }
-    planBuilder.appendChild(renderIssueSubscriptionTracker());
+    planBuilder.appendChild(renderRecordsManagementNotice());
     target.appendChild(planBuilder);
 
     const toolbar = el("div", "plan-toolbar");
@@ -1140,7 +1460,115 @@
     const list = qs("#records-list");
     if (!list) return;
     clear(list);
-    list.appendChild(el("p", "panel-note", "记录页展示页面内 mock 记录，不做持久化写入。"));
+    const dashboard = el("div", "records-dashboard");
+    const header = el("section", "records-toolbar");
+    const headerCopy = el("div", "");
+    headerCopy.appendChild(el("span", "section-label", "Records dashboard"));
+    headerCopy.appendChild(el("h3", "", "记录与 Issue 订阅"));
+    headerCopy.appendChild(el("p", "panel-note", "在这里恢复历史流程、查看 Assist/Business Issue 订阅，并处理暂停、隐去、本地移除或 token-gated 关闭。删除本地记录不会修改 Multica。"));
+    const newFlow = el("button", "primary-button");
+    newFlow.type = "button";
+    newFlow.setAttribute("data-action", "new-workflow");
+    newFlow.appendChild(makeIcon("plus"));
+    newFlow.appendChild(el("span", "", "新建流程"));
+    header.appendChild(headerCopy);
+    header.appendChild(newFlow);
+    dashboard.appendChild(header);
+    dashboard.appendChild(renderRecordsOverview());
+    const main = el("div", "records-main-grid");
+    main.appendChild(renderWorkflowRecordsPanel());
+    main.appendChild(renderIssueSubscriptionTracker());
+    dashboard.appendChild(main);
+    dashboard.appendChild(renderRecordsActivityPanel());
+    list.appendChild(dashboard);
+  }
+
+  function renderRecordsOverview() {
+    const subscriptions = visibleSubscriptions();
+    const summary = summarizeSubscriptions(subscriptions);
+    const activePending = (state.pendingAssists || []).filter(isActivePendingAssist).length;
+    const metrics = [
+      ["工作流", state.workflowRecords.length],
+      ["运行中 Assist", activePending],
+      ["业务 Issue", summary.business_issue],
+      ["错误/阻塞", summary.error],
+    ];
+    const overview = el("section", "records-overview-grid");
+    metrics.forEach(([label, value]) => {
+      const item = el("article", "records-overview-item");
+      item.appendChild(el("span", "section-label", label));
+      item.appendChild(el("strong", "", String(value)));
+      overview.appendChild(item);
+    });
+    return overview;
+  }
+
+  function renderWorkflowRecordsPanel() {
+    const panel = el("section", "workflow-record-panel");
+    const header = el("div", "split-header");
+    header.appendChild(el("h3", "", "工作流记录"));
+    header.appendChild(el("span", "config-status", `${state.workflowRecords.length} 条`));
+    panel.appendChild(header);
+    if (!state.workflowRecords.length) {
+      panel.appendChild(el("p", "setting-help", "暂无历史工作流记录。澄清、锁定、拆分或预览后会自动保存；也可以点击新建流程前保存当前内容。"));
+    } else {
+      const records = el("div", "workflow-record-list");
+      state.workflowRecords.forEach((record) => {
+        const item = el("article", "workflow-record-card");
+        const top = el("div", "split-header");
+        top.appendChild(el("h4", "", record.title));
+        top.appendChild(el("span", "config-status", formatDateTime(record.updatedAt)));
+        item.appendChild(top);
+        if (record.objective) {
+          item.appendChild(el("p", "", record.objective));
+        }
+        const meta = el("dl", "config-definition");
+        const pendingCount = (record.snapshot?.pendingAssists || []).filter(isActivePendingAssist).length;
+        [
+          ["Plan", record.counts.plans],
+          ["Issue 候选", record.counts.issueCandidates],
+          ["已创建 Issue", record.counts.createdIssues],
+          ["订阅", record.counts.subscriptions],
+          ["Assist 运行中", pendingCount],
+          ["状态", record.snapshot?.goalPlanStatus || "已保存"],
+        ].forEach(([label, value]) => {
+          meta.appendChild(el("dt", "", label));
+          meta.appendChild(el("dd", "", String(value)));
+        });
+        item.appendChild(meta);
+        if (record.snapshot?.goalPlanFeedback) {
+          item.appendChild(el("p", "setting-help", compactText(record.snapshot.goalPlanFeedback, 120)));
+        }
+        const actions = el("div", "issue-card-actions");
+        const restore = el("button", "outline-button compact-button");
+        restore.type = "button";
+        restore.setAttribute("data-action", "restore-workflow-record");
+        restore.setAttribute("data-workflow-record-id", record.id);
+        restore.appendChild(makeIcon("play"));
+        restore.appendChild(el("span", "", "查看"));
+        const remove = el("button", "outline-button compact-button danger-button");
+        remove.type = "button";
+        remove.setAttribute("data-action", "delete-workflow-record");
+        remove.setAttribute("data-workflow-record-id", record.id);
+        remove.appendChild(makeIcon("x"));
+        remove.appendChild(el("span", "", "删除记录"));
+        actions.appendChild(restore);
+        actions.appendChild(remove);
+        item.appendChild(actions);
+        records.appendChild(item);
+      });
+      panel.appendChild(records);
+    }
+    return panel;
+  }
+
+  function renderRecordsActivityPanel() {
+    const legacy = el("section", "legacy-record-card records-activity-panel");
+    const header = el("div", "split-header");
+    header.appendChild(el("h3", "", "页面事件"));
+    header.appendChild(el("span", "config-status", `${state.records.length} 条`));
+    legacy.appendChild(header);
+    legacy.appendChild(el("p", "setting-help", "辅助事件流只记录当前浏览器会话内的界面动作，不替代 Multica audit。"));
     const records = el("ul", "record-list");
     state.records.slice().reverse().forEach((record) => {
       const item = el("li", "record-item");
@@ -1149,7 +1577,23 @@
       item.appendChild(el("p", "", record.detail));
       records.appendChild(item);
     });
-    list.appendChild(records);
+    legacy.appendChild(records);
+    return legacy;
+  }
+
+  function renderRecordsManagementNotice() {
+    const section = el("section", "records-management-notice");
+    const copy = el("div", "");
+    copy.appendChild(el("span", "section-label", "记录管理"));
+    copy.appendChild(el("p", "", "订阅和历史记录在记录页管理。Plan 页只保留 Goal -> Plan -> Issue 的执行链路。"));
+    const button = el("button", "outline-button compact-button");
+    button.type = "button";
+    button.setAttribute("data-action", "open-records");
+    button.appendChild(makeIcon("records"));
+    button.appendChild(el("span", "", "打开记录页"));
+    section.appendChild(copy);
+    section.appendChild(button);
+    return section;
   }
 
   function renderSettings() {
@@ -1468,8 +1912,12 @@
 
   function setViewVisibility() {
     const activeId = viewIds[state.activeView] || "placeholder-view";
+    const privacyPlaceholder = qs("#content-privacy-placeholder");
+    if (privacyPlaceholder) {
+      privacyPlaceholder.hidden = !state.contentHidden;
+    }
     qsa("[data-view]").forEach((node) => {
-      node.hidden = node.id !== activeId;
+      node.hidden = state.contentHidden || node.id !== activeId;
     });
   }
 
@@ -1510,7 +1958,8 @@
     header.appendChild(el("h3", "", "Issue 执行跟踪"));
     header.appendChild(el("span", "config-status", state.issueSubscriptionStatus || "未同步"));
     section.appendChild(header);
-    const subscriptions = state.issueSubscriptions || [];
+    section.appendChild(el("p", "setting-help", "订阅同步只读取 Multica issue、run 和 comment，不会写入业务 Issue。真实关闭必须输入确认 token。"));
+    const subscriptions = visibleSubscriptions();
     const summary = summarizeSubscriptions(subscriptions);
     const summaryRow = el("div", "subscription-summary-grid");
     [
@@ -1531,8 +1980,11 @@
     if (state.issueSubscriptionWarning) {
       section.appendChild(el("p", "goal-feedback", state.issueSubscriptionWarning));
     }
+    if (state.issueSubscriptionActionStatus) {
+      section.appendChild(el("p", "goal-feedback", state.issueSubscriptionActionStatus));
+    }
     if (!subscriptions.length) {
-      section.appendChild(el("p", "setting-help", "暂无订阅。Goal 澄清 Assist Issue、Plan 拆分 Assist Issue 和业务 Issue 创建成功后会进入这里。"));
+      section.appendChild(el("p", "setting-help", "暂无可见订阅。Goal 澄清 Assist Issue、Plan 拆分 Assist Issue 和业务 Issue 创建成功后会进入这里；被暂时隐去的订阅仍保留在本地。"));
       return section;
     }
     const groups = [
@@ -1540,22 +1992,84 @@
       ["assist_plan_split", "Assist Plan"],
       ["business_issue", "Business Issues"],
     ];
+    const board = el("div", "subscription-lane-board");
     groups.forEach(([kind, label]) => {
       const groupItems = subscriptions.filter((item) => item.kind === kind);
-      if (!groupItems.length) return;
-      const group = el("section", "subscription-group");
-      group.appendChild(el("h4", "", label));
-      const list = el("ul", "created-issue-list");
+      const group = el("section", "subscription-group subscription-lane");
+      const groupHeader = el("div", "subscription-lane-header");
+      groupHeader.appendChild(el("h4", "", label));
+      groupHeader.appendChild(el("span", "config-status", String(groupItems.length)));
+      group.appendChild(groupHeader);
+      const list = el("div", "subscription-row-list");
+      if (!groupItems.length) {
+        list.appendChild(el("p", "setting-help", "暂无订阅。"));
+      }
       groupItems.slice(0, 6).forEach((subscription) => {
-        const item = el("li", "", `${subscription.issueIdentifier || subscription.issueId} · ${subscription.title || label} · ${subscription.state || "active"} · ${subscription.lastKnownStatus || "未同步"}${subscription.lastRunStatus ? ` · Run ${subscription.lastRunStatus}` : ""}`);
+        const item = el("article", "subscription-row");
+        const title = el("div", "subscription-row-main");
+        title.appendChild(el("strong", "subscription-title", `${subscription.issueIdentifier || subscription.issueId} · ${subscription.title || label}`));
+        const meta = el("span", "subscription-meta", `${subscription.state || "active"} · ${subscription.lastKnownStatus || "未同步"}${subscription.lastRunStatus ? ` · Run ${subscription.lastRunStatus}` : ""}`);
+        title.appendChild(meta);
         if (subscription.lastCommentExcerpt) {
-          item.appendChild(el("span", "subscription-comment", ` · ${subscription.lastCommentExcerpt}`));
+          title.appendChild(el("span", "subscription-comment", subscription.lastCommentExcerpt));
         }
+        item.appendChild(title);
+        const actions = el("div", "issue-card-actions subscription-row-actions");
+        const open = el("button", "outline-button compact-button");
+        open.type = "button";
+        open.setAttribute("data-action", "open-issue");
+        open.setAttribute("data-issue-id", subscription.issueId);
+        open.setAttribute("data-issue-identifier", subscription.issueIdentifier || "");
+        open.appendChild(makeIcon("arrow"));
+        open.appendChild(el("span", "", "查看"));
+        const pauseResume = el("button", "outline-button compact-button");
+        pauseResume.type = "button";
+        pauseResume.setAttribute("data-action", subscription.state === "paused" ? "resume-subscription" : "pause-subscription");
+        pauseResume.setAttribute("data-subscription-id", subscription.id);
+        pauseResume.appendChild(makeIcon(subscription.state === "paused" ? "play" : "pause"));
+        pauseResume.appendChild(el("span", "", subscription.state === "paused" ? "恢复" : "暂停"));
+        const hide = el("button", "outline-button compact-button");
+        hide.type = "button";
+        hide.setAttribute("data-action", "hide-subscription");
+        hide.setAttribute("data-subscription-id", subscription.id);
+        hide.appendChild(makeIcon("eye"));
+        hide.appendChild(el("span", "", "隐去"));
+        const remove = el("button", "outline-button compact-button danger-button");
+        remove.type = "button";
+        remove.setAttribute("data-action", "delete-subscription");
+        remove.setAttribute("data-subscription-id", subscription.id);
+        remove.appendChild(makeIcon("x"));
+        remove.appendChild(el("span", "", "移除"));
+        const close = el("button", "outline-button compact-button danger-button");
+        close.type = "button";
+        close.setAttribute("data-action", "close-subscription");
+        close.setAttribute("data-subscription-id", subscription.id);
+        close.appendChild(makeIcon("x"));
+        close.appendChild(el("span", "", "关闭"));
+        actions.appendChild(open);
+        actions.appendChild(pauseResume);
+        actions.appendChild(hide);
+        actions.appendChild(remove);
+        actions.appendChild(close);
+        item.appendChild(actions);
         list.appendChild(item);
       });
       group.appendChild(list);
-      section.appendChild(group);
+      board.appendChild(group);
     });
+    section.appendChild(board);
+    const danger = el("section", "subscription-danger-zone");
+    const dangerCopy = el("div", "");
+    dangerCopy.appendChild(el("h4", "", "危险操作确认"));
+    dangerCopy.appendChild(el("p", "setting-help", `关闭真实 Issue 会执行 multica issue status <id> cancelled --output json。本地移除订阅不会影响 Multica。`));
+    const closeInput = el("input", "confirm-input subscription-close-confirm");
+    closeInput.id = "subscription-close-confirm";
+    closeInput.value = state.subscriptionCloseConfirm;
+    closeInput.placeholder = CLOSE_SUBSCRIPTION_CONFIRMATION_TOKEN;
+    closeInput.setAttribute("aria-label", "关闭真实 Issue 确认 token");
+    danger.appendChild(dangerCopy);
+    danger.appendChild(closeInput);
+    section.appendChild(danger);
     return section;
   }
 
@@ -1576,17 +2090,52 @@
     });
   }
 
-  function savePendingAssist(pending) {
-    stopAssistSubscription();
-    state.pendingAssist = pending;
-    mockData.llmAssist.lastAssist = pending.assist || null;
-    persistWorkflowDraft();
-    subscribeToPendingAssist();
+  function visibleSubscriptions() {
+    const hidden = new Set((state.hiddenSubscriptionIds || []).map(String));
+    return (state.issueSubscriptions || []).filter((subscription) => !hidden.has(String(subscription.id || subscription.issueId)));
   }
 
-  function clearPendingAssist() {
-    stopAssistSubscription();
-    state.pendingAssist = null;
+  function updateSubscriptionInState(subscription) {
+    if (!subscription) return;
+    const key = subscription.id || subscription.issueId;
+    const byId = new Map((state.issueSubscriptions || []).map((item) => [item.id || item.issueId, item]));
+    byId.set(key, { ...(byId.get(key) || {}), ...subscription });
+    state.issueSubscriptions = Array.from(byId.values());
+    persistWorkflowDraft();
+  }
+
+  function removeSubscriptionFromState(subscriptionId) {
+    state.issueSubscriptions = (state.issueSubscriptions || []).filter((subscription) => String(subscription.id) !== String(subscriptionId));
+    state.hiddenSubscriptionIds = (state.hiddenSubscriptionIds || []).filter((id) => String(id) !== String(subscriptionId));
+    persistWorkflowDraft();
+    persistHiddenSubscriptions();
+  }
+
+  function formatDateTime(value) {
+    if (!value) return "未保存";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString("zh-CN", { hour12: false });
+  }
+
+  function savePendingAssist(pending) {
+    const next = normalizePendingAssist(pending, pending?.workflowId || state.workflowId);
+    if (!next) return;
+    mergePendingAssists([next]);
+    if (next.workflowId === state.workflowId) {
+      state.pendingAssist = next;
+      mockData.llmAssist.lastAssist = next.assist || null;
+    }
+    persistWorkflowDraft();
+    subscribeToPendingAssist(next);
+  }
+
+  function clearPendingAssist(pendingOrId = state.pendingAssist) {
+    if (!pendingOrId) return;
+    const id = typeof pendingOrId === "string" ? pendingOrId : pendingAssistId(pendingOrId);
+    stopAssistSubscription(id);
+    state.pendingAssists = (state.pendingAssists || []).filter((pending) => pendingAssistId(pending) !== id);
+    syncCurrentPendingAssist();
     persistWorkflowDraft();
   }
 
@@ -1597,12 +2146,15 @@
     state.issueApplyError = "";
   }
 
-  function subscribeToPendingAssist() {
-    const pending = state.pendingAssist;
+  function subscribeToPendingAssist(pending = state.pendingAssist) {
+    pending = normalizePendingAssist(pending, pending?.workflowId || state.workflowId);
     if (!pending?.issueId) return;
-    stopAssistSubscription();
-    state.goalPlanFeedback = `${pending.label || "Agent assist"} 正在运行；已订阅 Assist Issue ${pending.issueIdentifier || pending.issueId} 的收件箱结果。`;
-    renderAll();
+    const pendingId = pendingAssistId(pending);
+    stopAssistSubscription(pendingId);
+    if (pending.workflowId === state.workflowId) {
+      state.goalPlanFeedback = `${pending.label || "Agent assist"} 正在运行；已订阅 Assist Issue ${pending.issueIdentifier || pending.issueId} 的收件箱结果。`;
+      renderAll();
+    }
 
     const params = encodeQuery({
       kind: pending.kind,
@@ -1615,20 +2167,22 @@
     const EventSourceCtor = window?.EventSource;
     if (typeof EventSourceCtor === "function") {
       const eventSource = new EventSourceCtor(`/api/assist/subscribe?${params}`);
-      assistSubscription = { eventSource, timer: null };
+      assistSubscriptions.set(pendingId, { eventSource, timer: null });
       eventSource.addEventListener("pending", () => {
-        state.goalPlanStatus = pending.kind === "goal" ? "澄清中" : "Agent 拆分中";
-        state.goalPlanFeedback = `${pending.label || "Agent assist"} 仍在运行；正在实时订阅 ${pending.issueIdentifier || pending.issueId}。`;
-        renderAll();
+        if (pending.workflowId === state.workflowId) {
+          state.goalPlanStatus = pending.kind === "goal" ? "澄清中" : "Agent 拆分中";
+          state.goalPlanFeedback = `${pending.label || "Agent assist"} 仍在运行；正在实时订阅 ${pending.issueIdentifier || pending.issueId}。`;
+          renderAll();
+        }
       });
       eventSource.addEventListener("completed", async () => {
         eventSource.close();
-        assistSubscription = null;
+        assistSubscriptions.delete(pendingId);
         await pollAssistResultOnce(pending, { fromSubscription: true });
       });
       eventSource.addEventListener("blocked", (event) => {
         eventSource.close();
-        assistSubscription = null;
+        assistSubscriptions.delete(pendingId);
         let payload = {};
         try {
           payload = JSON.parse(event.data || "{}");
@@ -1639,7 +2193,7 @@
       });
       eventSource.onerror = () => {
         eventSource.close();
-        assistSubscription = null;
+        assistSubscriptions.delete(pendingId);
         scheduleAssistPolling(pending, 0);
       };
       return;
@@ -1649,14 +2203,18 @@
   }
 
   function scheduleAssistPolling(pending, delayMs) {
+    pending = normalizePendingAssist(pending, pending?.workflowId || state.workflowId);
     if (!pending?.issueId) return;
+    const pendingId = pendingAssistId(pending);
+    stopAssistSubscription(pendingId);
     const timer = setTimeout(async () => {
       await pollAssistResultOnce(pending);
     }, delayMs);
-    assistSubscription = { eventSource: null, timer };
+    assistSubscriptions.set(pendingId, { eventSource: null, timer });
   }
 
   async function pollAssistResultOnce(pending, options = {}) {
+    pending = normalizePendingAssist(pending, pending?.workflowId || state.workflowId);
     if (!pending?.issueId) return;
     try {
       const response = await fetch("/api/assist/result", {
@@ -1680,24 +2238,110 @@
         return;
       }
       if (payload.pending) {
-        state.goalPlanStatus = pending.kind === "goal" ? "澄清中" : "Agent 拆分中";
-        state.goalPlanFeedback = `${pending.label || "Agent assist"} 仍在运行；下一次刷新或订阅会继续读取同一个 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
+        if (pending.workflowId === state.workflowId) {
+          state.goalPlanStatus = pending.kind === "goal" ? "澄清中" : "Agent 拆分中";
+          state.goalPlanFeedback = `${pending.label || "Agent assist"} 仍在运行；下一次刷新或订阅会继续读取同一个 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
+        }
         persistWorkflowDraft();
-        renderAll();
+        if (pending.workflowId === state.workflowId) renderAll();
         scheduleAssistPolling(pending, ASSIST_POLL_INTERVAL_MS);
         return;
       }
       completePendingAssist(pending, payload, options);
     } catch (error) {
-      state.goalPlanStatus = "阻塞";
-      state.goalPlanFeedback = `${pending.label || "Agent assist"} 订阅读取失败：${error.message || String(error)}。刷新页面后会继续订阅同一个 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
+      if (pending.workflowId === state.workflowId) {
+        state.goalPlanStatus = "阻塞";
+        state.goalPlanFeedback = `${pending.label || "Agent assist"} 订阅读取失败：${error.message || String(error)}。刷新页面后会继续订阅同一个 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
+        renderAll();
+      } else {
+        updateWorkflowRecordForPending(pending, (snapshot) => {
+          snapshot.goalPlanStatus = "阻塞";
+          snapshot.goalPlanFeedback = `${pending.label || "Agent assist"} 订阅读取失败：${error.message || String(error)}。`;
+        }, "assist-poll-failed");
+      }
       persistWorkflowDraft();
-      renderAll();
       scheduleAssistPolling(pending, ASSIST_POLL_INTERVAL_MS);
     }
   }
 
+  function applyAssistPayloadToSnapshot(snapshot, pending, payload) {
+    if (pending.kind === "goal" && payload.goal) {
+      snapshot.normalizedGoal = payload.goal;
+      snapshot.lockedGoal = null;
+      snapshot.generatedPlan = null;
+      snapshot.planSet = null;
+      snapshot.issueSplit = null;
+      snapshot.issueApplyStatus = "idle";
+      snapshot.issueApplyResult = null;
+      snapshot.issueApplyError = "";
+      snapshot.lastAssist = payload.assist || payload.goal.assist || pending.assist || null;
+      snapshot.goalPlanStatus = payload.goal.status === "draft" ? "需要澄清" : "已澄清";
+      snapshot.goalPlanFeedback = payload.goal.status === "draft"
+        ? `Agent 已返回目标草稿；Assist Issue：${pending.issueIdentifier || pending.issueId}。`
+        : `${payload.goal.title} 已可锁定；结果来自 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
+    }
+    if (pending.kind === "planSet" && payload.planSet) {
+      snapshot.planSet = payload.planSet;
+      snapshot.generatedPlan = null;
+      snapshot.issueSplit = null;
+      snapshot.issueApplyStatus = "idle";
+      snapshot.issueApplyResult = null;
+      snapshot.issueApplyError = "";
+      snapshot.lastAssist = payload.assist || payload.planSet.assist || pending.assist || null;
+      snapshot.goalPlanStatus = "已拆分";
+      snapshot.goalPlanFeedback = `Multica Agent 已拆分为 ${payload.planSet.plans.length} 个并行 Plan；结果来自 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
+    }
+    snapshot.pendingAssists = (snapshot.pendingAssists || []).filter((item) => pendingAssistId(item) !== pendingAssistId(pending));
+    snapshot.pendingAssist = snapshot.pendingAssists.find((item) => item.workflowId === snapshot.workflowId && isActivePendingAssist(item)) || null;
+  }
+
+  function updateWorkflowRecordForPending(pending, updateSnapshot, reason = "assist-updated") {
+    const workflowId = pending.workflowId || state.workflowId;
+    const existing = state.workflowRecords.find((record) => record.workflowId === workflowId || record.id === workflowId);
+    const snapshot = existing?.snapshot ? { ...existing.snapshot } : {
+      workflowId,
+      language: pending.language || state.language,
+      goalRequest: pending.request || pending.lockedGoal?.title || "未命名工作流",
+      lockedGoal: pending.lockedGoal || null,
+      pendingAssist: pending,
+      pendingAssists: [pending],
+      goalPlanStatus: pending.kind === "goal" ? "澄清中" : "Agent 拆分中",
+      goalPlanFeedback: `${pending.label || "Agent assist"} 正在运行。`,
+    };
+    snapshot.workflowId = workflowId;
+    updateSnapshot(snapshot);
+    const title = snapshot.lockedGoal?.title || snapshot.normalizedGoal?.title || snapshot.goalRequest || existing?.title || "未命名工作流";
+    const objective = snapshot.lockedGoal?.objective || snapshot.normalizedGoal?.objective || existing?.objective || "";
+    const now = new Date().toISOString();
+    const next = normalizeWorkflowRecord({
+      ...(existing || {}),
+      id: existing?.id || workflowId,
+      workflowId,
+      title,
+      objective,
+      reason,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      snapshot,
+    });
+    state.workflowRecords = [next, ...state.workflowRecords.filter((record) => record.id !== next.id)].slice(0, 30);
+    persistWorkflowRecords();
+    return next;
+  }
+
   function completePendingAssist(pending, payload) {
+    pending = normalizePendingAssist(pending, pending?.workflowId || state.workflowId);
+    if (!pending) return;
+    if (pending.workflowId !== state.workflowId) {
+      updateWorkflowRecordForPending(pending, (snapshot) => {
+        applyAssistPayloadToSnapshot(snapshot, pending, payload);
+        snapshot.goalPlanFeedback = `${snapshot.goalPlanFeedback || "Agent assist 已完成"}（已在后台更新，点击查看记录恢复）。`;
+      }, pending.kind === "goal" ? "goal-assist-completed" : "plan-assist-completed");
+      clearPendingAssist(pending);
+      appendRecord("后台 Assist Issue 已完成", `${pending.issueIdentifier || pending.issueId} 的结果已写回对应工作流记录。`);
+      renderAll();
+      return;
+    }
     if (pending.kind === "goal" && payload.goal) {
       state.normalizedGoal = payload.goal;
       state.lockedGoal = null;
@@ -1722,16 +2366,29 @@
       state.goalPlanFeedback = `Multica Agent 已拆分为 ${payload.planSet.plans.length} 个并行 Plan；结果来自 Assist Issue ${pending.issueIdentifier || pending.issueId}。`;
       appendRecord("Agent 辅助拆分已从 Assist Issue 恢复", `${payload.planSet.plans.length} 个并行 Plan；结果来源：${payload.diagnostic?.outputSource || "unknown"}。`);
     }
-    clearPendingAssist();
+    clearPendingAssist(pending);
     persistWorkflowDraft();
+    saveCurrentWorkflowRecord(pending.kind === "goal" ? "goal-assist-completed" : "plan-assist-completed");
     renderAll();
   }
 
   function handleAssistBlocked(pending, payload = {}) {
-    state.goalPlanStatus = "阻塞";
-    state.goalPlanFeedback = `${formatLlmFailure(payload)} Assist Issue：${pending.issueIdentifier || pending.issueId}。`;
-    appendRecord("Agent assist 结果读取阻塞", state.goalPlanFeedback);
-    clearPendingAssist();
+    pending = normalizePendingAssist(pending, pending?.workflowId || state.workflowId);
+    const feedback = `${formatLlmFailure(payload)} Assist Issue：${pending.issueIdentifier || pending.issueId}。`;
+    if (pending.workflowId === state.workflowId) {
+      state.goalPlanStatus = "阻塞";
+      state.goalPlanFeedback = feedback;
+      appendRecord("Agent assist 结果读取阻塞", state.goalPlanFeedback);
+    } else {
+      updateWorkflowRecordForPending(pending, (snapshot) => {
+        snapshot.goalPlanStatus = "阻塞";
+        snapshot.goalPlanFeedback = feedback;
+        snapshot.pendingAssists = (snapshot.pendingAssists || []).filter((item) => pendingAssistId(item) !== pendingAssistId(pending));
+        snapshot.pendingAssist = null;
+      }, "assist-blocked");
+      appendRecord("后台 Assist Issue 读取阻塞", feedback);
+    }
+    clearPendingAssist(pending);
     renderAll();
   }
 
@@ -1784,6 +2441,7 @@
 
       if (nav) {
         state.activeView = nav.getAttribute("data-nav-target") || "project";
+        state.contentHidden = false;
         renderAll();
         return;
       }
@@ -1791,8 +2449,39 @@
       if (!action) return;
       const kind = action.getAttribute("data-action");
       const template = currentTemplate();
-      if (kind === "open-permissions") {
+      if (kind === "toggle-content-visibility") {
+        state.contentHidden = !state.contentHidden;
+        renderAll();
+      } else if (kind === "show-workspace-content") {
+        state.contentHidden = false;
+        renderAll();
+      } else if (kind === "new-workflow") {
+        resetCurrentWorkflow();
+        appendRecord("新建流程", "当前工作区已清空为新的 Goal/Plan 流程；历史记录和订阅表保留。");
+        state.activeView = "control";
+        renderAll();
+      } else if (kind === "restore-workflow-record") {
+        const recordId = action.getAttribute("data-workflow-record-id") || "";
+        const record = state.workflowRecords.find((item) => item.id === recordId);
+        if (record) {
+          applyWorkflowSnapshot(record.snapshot);
+          appendRecord("工作流记录已查看", record.title);
+          state.activeView = "control";
+          renderAll();
+        }
+      } else if (kind === "delete-workflow-record") {
+        const recordId = action.getAttribute("data-workflow-record-id") || "";
+        state.workflowRecords = state.workflowRecords.filter((record) => record.id !== recordId);
+        persistWorkflowRecords();
+        appendRecord("工作流记录已删除", recordId);
+        renderAll();
+      } else if (kind === "open-permissions") {
         state.activeView = "permissions";
+        state.contentHidden = false;
+        renderAll();
+      } else if (kind === "open-records") {
+        state.activeView = "records";
+        state.contentHidden = false;
         renderAll();
       } else if (kind === "open-agent-config") {
         state.agentConfigOpen = true;
@@ -1816,6 +2505,8 @@
         readLlmSecretMetadataFromSettings();
       } else if (kind === "clarify-goal") {
         clarifyGoal();
+      } else if (kind === "submit-goal-clarification") {
+        submitGoalClarification();
       } else if (kind === "lock-goal") {
         lockGoal();
       } else if (kind === "preview-issue-split") {
@@ -1830,6 +2521,20 @@
       } else if (kind === "open-issue") {
         const issueId = action.getAttribute("data-issue-identifier") || action.getAttribute("data-issue-id") || "";
         appendRecord("打开 Issue", `请在 Multica 中查看 ${issueId}。`);
+      } else if (kind === "pause-subscription" || kind === "resume-subscription") {
+        updateSubscriptionState(action.getAttribute("data-subscription-id") || "", kind === "pause-subscription" ? "pause" : "resume");
+      } else if (kind === "hide-subscription") {
+        const subscriptionId = action.getAttribute("data-subscription-id") || "";
+        if (subscriptionId && !state.hiddenSubscriptionIds.includes(subscriptionId)) {
+          state.hiddenSubscriptionIds.push(subscriptionId);
+          persistHiddenSubscriptions();
+          state.issueSubscriptionActionStatus = "订阅已暂时隐去；本地订阅表和 Multica Issue 未改变。";
+          renderAll();
+        }
+      } else if (kind === "delete-subscription") {
+        deleteSubscription(action.getAttribute("data-subscription-id") || "");
+      } else if (kind === "close-subscription") {
+        closeSubscription(action.getAttribute("data-subscription-id") || "");
       } else if (kind === "split-plan-llm") {
         splitPlanWithLlm();
       } else if (kind === "preview-selected-preset") {
@@ -1878,6 +2583,10 @@
         state.goalRequest = event.target.value;
         persistWorkflowDraft();
       }
+      if (event.target.matches("#goal-clarification-answer")) {
+        state.goalClarificationAnswer = event.target.value;
+        persistWorkflowDraft();
+      }
       if (event.target.matches("#llm-custom-command")) {
         mockData.llmAssist.customCommand = event.target.value;
       }
@@ -1900,6 +2609,9 @@
         state.issueApplyConfirm = event.target.value;
         persistWorkflowDraft();
       }
+      if (event.target.matches("#subscription-close-confirm")) {
+        state.subscriptionCloseConfirm = event.target.value;
+      }
     });
 
     document.addEventListener("change", (event) => {
@@ -1920,12 +2632,101 @@
     });
   }
 
-  async function clarifyGoal() {
+  function buildGoalNormalizeContext({ includeClarification = false } = {}) {
+    const context = {
+      project: mockData.project,
+      owner: "Codex monitoring session",
+      source: "gui",
+      language: state.language
+    };
+    if (includeClarification) {
+      context.clarification = {
+        previousGoal: state.normalizedGoal,
+        questions: state.normalizedGoal?.clarificationQuestions || [],
+        answer: state.goalClarificationAnswer.trim()
+      };
+    }
+    return context;
+  }
+
+  function submitGoalClarification() {
+    if (!state.normalizedGoal || state.normalizedGoal.status !== "draft") return;
+    const answer = qs("#goal-clarification-answer")?.value || state.goalClarificationAnswer || "";
+    state.goalClarificationAnswer = answer;
+    if (!answer.trim()) {
+      state.goalPlanFeedback = "请先填写澄清补充说明。";
+      renderAll();
+      return;
+    }
+    if (state.pendingAssist?.kind === "goal" && state.pendingAssist.issueId) {
+      replyToGoalAssistInbox();
+      return;
+    }
+    clarifyGoal({ includeClarification: true });
+  }
+
+  async function replyToGoalAssistInbox() {
+    const pending = state.pendingAssist;
+    if (!pending?.issueId) return;
     if (state.goalPlanStatus === "澄清中") return;
+    const answer = state.goalClarificationAnswer.trim();
+    const context = buildGoalNormalizeContext({ includeClarification: true });
+    const nextRequestId = nextAssistRequestId("goal");
     state.goalPlanStatus = "澄清中";
-    state.goalPlanFeedback = "正在通过 Multica Agent 创建 assist issue/task 并归一化目标...";
+    state.goalPlanFeedback = `正在把补充澄清发送到 Assist Issue ${pending.issueIdentifier || pending.issueId} 的回复区...`;
     renderAll();
     try {
+      const response = await fetch("/api/assist/reply", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "goal",
+          issueId: pending.issueId,
+          issueIdentifier: pending.issueIdentifier,
+          agent: pending.agent,
+          request: state.goalRequest,
+          context,
+          message: answer,
+          assistRequestId: nextRequestId,
+          language: state.language
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(formatLlmFailure(payload));
+      const nextPending = {
+        ...pending,
+        workflowId: pending.workflowId || state.workflowId,
+        assist: payload.assist || pending.assist,
+        agent: payload.assist?.agent || pending.agent,
+        issueId: payload.assist?.issue?.id || pending.issueId,
+        issueIdentifier: payload.assist?.issue?.identifier || pending.issueIdentifier,
+        request: state.goalRequest,
+        context,
+        language: state.language,
+        assistRequestId: payload.assistRequestId || nextRequestId,
+      };
+      state.goalPlanFeedback = `已发送到 Assist Issue ${nextPending.issueIdentifier || nextPending.issueId} 的回复区，正在订阅新的返回结果。`;
+      appendRecord("目标澄清补充已发送", `已发送到 Assist Issue ${nextPending.issueIdentifier || nextPending.issueId}。`);
+      savePendingAssist(nextPending);
+      renderAll();
+    } catch (error) {
+      state.goalPlanStatus = "阻塞";
+      state.goalPlanFeedback = `补充澄清发送失败：${error.message || String(error)}。`;
+      appendRecord("目标澄清补充发送失败", state.goalPlanFeedback);
+      persistWorkflowDraft();
+      renderAll();
+    }
+  }
+
+  async function clarifyGoal({ includeClarification = false } = {}) {
+    if (state.goalPlanStatus === "澄清中") return;
+    state.goalPlanStatus = "澄清中";
+    state.goalPlanFeedback = includeClarification
+      ? "正在提交补充澄清并重新归一化目标..."
+      : "正在通过 Multica Agent 创建 assist issue/task 并归一化目标...";
+    renderAll();
+    try {
+      const normalizeContext = buildGoalNormalizeContext({ includeClarification });
       const assistConfig = {
         ...currentAssistConfig(),
         chainId: assistChainId("goal", state.goalRequest),
@@ -1940,12 +2741,7 @@
           async: true,
           assist: assistConfig,
           language: state.language,
-          context: {
-            project: mockData.project,
-            owner: "Codex monitoring session",
-            source: "gui",
-            language: state.language
-          }
+          context: normalizeContext
         })
       });
       const payload = await response.json();
@@ -1953,6 +2749,7 @@
       if (payload.pending) {
         const assist = payload.assist || {};
         const pending = {
+          workflowId: state.workflowId,
           kind: "goal",
           label: "目标澄清",
           issueId: assist.issue?.id,
@@ -1961,12 +2758,7 @@
           assist,
           timeoutMs: assistConfig.timeoutMs,
           request: state.goalRequest,
-          context: {
-            project: mockData.project,
-            owner: "Codex monitoring session",
-            source: "gui",
-            language: state.language
-          },
+          context: normalizeContext,
           language: state.language,
           assistChainId: payload.assistChainId || assistConfig.chainId,
           assistRequestId: payload.assistRequestId || assistConfig.requestId
@@ -1985,11 +2777,15 @@
       state.issueSplit = null;
       resetIssueApplyState();
       mockData.llmAssist.lastAssist = payload.assist || payload.goal.assist || null;
+      if (payload.goal.status !== "draft") {
+        state.goalClarificationAnswer = "";
+      }
       state.goalPlanStatus = payload.goal.status === "draft" ? "需要澄清" : "已澄清";
       state.goalPlanFeedback = payload.goal.status === "draft"
         ? "目标仍为草稿。请先回答待澄清问题，再锁定。"
         : `${payload.goal.title} 已可锁定。Assist Issue：${payload.goal.assist?.issue?.identifier || payload.goal.assist?.issue?.id || "已创建"}。`;
       persistWorkflowDraft();
+      saveCurrentWorkflowRecord("goal-clarified");
       appendRecord("目标已澄清", `${payload.goal.title}（${goalStatusLabel(payload.goal.status)}）；通过 Multica Agent assist issue/task 生成。`);
       renderAll();
     } catch (error) {
@@ -2023,6 +2819,7 @@
       state.goalPlanStatus = "已锁定";
       state.goalPlanFeedback = `${payload.goal.title} 已锁定，现在可以预览计划。`;
       persistWorkflowDraft();
+      saveCurrentWorkflowRecord("goal-locked");
       appendRecord("目标已锁定", `${payload.goal.id} 已由 ${payload.goal.approvedBy} 确认。`);
       renderAll();
     } catch (error) {
@@ -2085,6 +2882,7 @@
       state.goalPlanStatus = "已预览";
       state.goalPlanFeedback = state.issueSplit.summary;
       persistWorkflowDraft();
+      saveCurrentWorkflowRecord("issue-previewed");
       appendRecord("Issue 拆分已预览", `${state.issueSplit.mode} · ${state.issueSplit.issues.length} 个 issue 候选。`);
       renderAll();
     } catch (error) {
@@ -2135,6 +2933,7 @@
       persistWorkflowDraft();
       appendRecord("业务 Issue 已创建", `${payload.result.createdIssues?.map((issue) => issue.identifier || issue.id).filter(Boolean).join(", ") || "无返回 id"}。`);
       await loadIssueSubscriptions({ sync: true, immediate: true });
+      saveCurrentWorkflowRecord("issue-created");
       renderAll();
     } catch (error) {
       state.issueApplyStatus = "failed";
@@ -2143,6 +2942,80 @@
       state.goalPlanFeedback = state.issueApplyError;
       appendRecord("业务 Issue 创建失败", state.issueApplyError);
       persistWorkflowDraft();
+      renderAll();
+    }
+  }
+
+  async function updateSubscriptionState(subscriptionId, action) {
+    if (!subscriptionId) return;
+    state.issueSubscriptionActionStatus = action === "pause" ? "正在暂停订阅..." : "正在恢复订阅...";
+    renderAll();
+    try {
+      const response = await fetch(`/api/issue-subscriptions/${encodeURIComponent(subscriptionId)}/${action}`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "subscription state update failed");
+      updateSubscriptionInState(payload.subscription);
+      state.issueSubscriptionActionStatus = action === "pause" ? "订阅已暂停；Multica Issue 未改变。" : "订阅已恢复。";
+      appendRecord(action === "pause" ? "订阅已暂停" : "订阅已恢复", payload.subscription?.issueIdentifier || payload.subscription?.issueId || subscriptionId);
+      renderAll();
+    } catch (error) {
+      state.issueSubscriptionActionStatus = error.message || String(error);
+      renderAll();
+    }
+  }
+
+  async function deleteSubscription(subscriptionId) {
+    if (!subscriptionId) return;
+    state.issueSubscriptionActionStatus = "正在从本地订阅表移除...";
+    renderAll();
+    try {
+      const response = await fetch(`/api/issue-subscriptions/${encodeURIComponent(subscriptionId)}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "subscription delete failed");
+      removeSubscriptionFromState(subscriptionId);
+      state.issueSubscriptionActionStatus = "订阅已从本地移除；真实 Multica Issue 未改变。";
+      appendRecord("订阅已本地移除", subscriptionId);
+      renderAll();
+    } catch (error) {
+      state.issueSubscriptionActionStatus = error.message || String(error);
+      renderAll();
+    }
+  }
+
+  async function closeSubscription(subscriptionId) {
+    if (!subscriptionId) return;
+    const confirmInputValue = qs("#subscription-close-confirm")?.value ?? state.subscriptionCloseConfirm;
+    state.subscriptionCloseConfirm = confirmInputValue;
+    if (confirmInputValue !== CLOSE_SUBSCRIPTION_CONFIRMATION_TOKEN) {
+      state.issueSubscriptionActionStatus = `必须输入 ${CLOSE_SUBSCRIPTION_CONFIRMATION_TOKEN}`;
+      renderAll();
+      return;
+    }
+    state.issueSubscriptionActionStatus = "正在关闭真实 Multica Issue...";
+    renderAll();
+    try {
+      const response = await fetch(`/api/issue-subscriptions/${encodeURIComponent(subscriptionId)}/close`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          execute: true,
+          confirm: confirmInputValue,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok || !payload.result?.ok) {
+        throw new Error(payload.error || payload.result?.error || payload.result?.reason || "subscription close failed");
+      }
+      updateSubscriptionInState(payload.result.subscription);
+      state.issueSubscriptionActionStatus = `${payload.result.subscription?.issueIdentifier || payload.result.subscription?.issueId || subscriptionId} 已关闭为 cancelled。`;
+      appendRecord("真实 Issue 已关闭", state.issueSubscriptionActionStatus);
+      renderAll();
+    } catch (error) {
+      state.issueSubscriptionActionStatus = error.message || String(error);
       renderAll();
     }
   }
@@ -2195,6 +3068,7 @@
       if (splitPayload.pending) {
         const assist = splitPayload.assist || {};
         const pending = {
+          workflowId: state.workflowId,
           kind: "planSet",
           label: "Plan 拆分",
           issueId: assist.issue?.id,
@@ -2223,6 +3097,7 @@
       mockData.llmAssist.lastAssist = splitPayload.assist || state.planSet.assist || null;
       state.goalPlanFeedback = `Multica Agent 已拆分为 ${state.planSet.plans.length} 个并行 Plan。Assist Issue：${state.planSet.assist?.issue?.identifier || state.planSet.assist?.issue?.id || "已创建"}。`;
       persistWorkflowDraft();
+      saveCurrentWorkflowRecord("plan-set-generated");
       appendRecord("Agent 辅助拆分已完成", `${state.planSet.assist?.agent?.name || "Multica Agent"} · ${state.planSet.plans.length} 个并行 Plan。`);
       renderAll();
     } catch (error) {
@@ -2526,7 +3401,9 @@
     (state.issueApplyResult?.createdIssues || []).forEach((item) => {
       if (item.id) ids.add(item.id);
     });
-    if (state.pendingAssist?.issueId) ids.add(state.pendingAssist.issueId);
+    (state.pendingAssists || []).forEach((pending) => {
+      if (pending.issueId) ids.add(pending.issueId);
+    });
     return Array.from(ids);
   }
 
@@ -2726,10 +3603,9 @@
     bindEvents();
     await loadPresetLibrary();
     await loadIssueSubscriptions({ sync: false });
+    syncCurrentPendingAssist();
     renderAll();
-    if (state.pendingAssist?.issueId) {
-      subscribeToPendingAssist();
-    }
+    (state.pendingAssists || []).filter(isActivePendingAssist).forEach((pending) => subscribeToPendingAssist(pending));
   }
 
   if (document.readyState === "loading") {

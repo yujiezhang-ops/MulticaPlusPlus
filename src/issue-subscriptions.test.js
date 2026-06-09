@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  closeIssueSubscription,
   deleteIssueSubscription,
   listIssueSubscriptions,
   registerIssueSubscription,
@@ -151,6 +152,72 @@ test("pause resume and delete update local subscription state only", async () =>
     const deleted = await deleteIssueSubscription({ storePath, id: registered.subscription.id });
     assert.equal(deleted.ok, true);
     assert.equal((await listIssueSubscriptions({ storePath })).subscriptions.length, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("closeIssueSubscription previews and token-gates real Multica status cancellation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-issue-subscriptions-close-"));
+  try {
+    const storePath = join(dir, "subscriptions.json");
+    const registered = await registerIssueSubscription({
+      storePath,
+      subscription: {
+        kind: "assist_plan_split",
+        issueId: "issue-plan-1",
+        issueIdentifier: "SPA-91",
+        title: "Plan 拆分 Assist Issue",
+        source: "plan_split",
+      },
+      now: "2026-06-08T00:00:00.000Z",
+    });
+    const calls = [];
+    const exec = async (args) => {
+      calls.push(args);
+      return { code: 0, stdout: JSON.stringify({ id: args[2], status: "cancelled" }), stderr: "" };
+    };
+
+    const preview = await closeIssueSubscription({
+      storePath,
+      id: registered.subscription.id,
+      exec,
+      execute: false,
+    });
+    assert.equal(preview.ok, true);
+    assert.equal(preview.mode, "dry-run");
+    assert.equal(preview.operation.displayCommand, "multica issue status issue-plan-1 cancelled --output json");
+    assert.equal(calls.length, 0);
+
+    const blocked = await closeIssueSubscription({
+      storePath,
+      id: registered.subscription.id,
+      exec,
+      execute: true,
+      confirm: "WRONG",
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.blocked, true);
+    assert.equal(blocked.reason, "close_subscription_confirmation_required");
+    assert.equal(calls.length, 0);
+
+    const closed = await closeIssueSubscription({
+      storePath,
+      id: registered.subscription.id,
+      exec,
+      execute: true,
+      confirm: "CLOSE-MULTICA-SUBSCRIBED-ISSUE",
+      now: "2026-06-08T00:02:00.000Z",
+    });
+    assert.equal(closed.ok, true);
+    assert.equal(closed.mode, "execute");
+    assert.deepEqual(calls, [["issue", "status", "issue-plan-1", "cancelled", "--output", "json"]]);
+    assert.equal(closed.subscription.state, "completed");
+    assert.equal(closed.subscription.lastKnownStatus, "cancelled");
+
+    const list = await listIssueSubscriptions({ storePath });
+    assert.equal(list.subscriptions[0].state, "completed");
+    assert.equal(list.subscriptions[0].lastKnownStatus, "cancelled");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

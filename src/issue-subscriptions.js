@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 
 const DEFAULT_SYNC_LIMIT = 30;
 const DEFAULT_INTERVAL_MS = 60000;
+export const CLOSE_ISSUE_SUBSCRIPTION_CONFIRMATION_TOKEN = "CLOSE-MULTICA-SUBSCRIBED-ISSUE";
 const ACTIVE_STATES = new Set(["active"]);
 const COMPLETED_STATUSES = new Set(["done", "completed", "closed", "resolved"]);
 
@@ -84,6 +85,91 @@ export async function deleteIssueSubscription({
   store.updatedAt = now;
   await writeStore(storePath, store);
   return { ok: true, deleted: before !== store.subscriptions.length };
+}
+
+export async function closeIssueSubscription({
+  storePath,
+  id,
+  exec,
+  execute = false,
+  confirm = "",
+  now = new Date().toISOString(),
+} = {}) {
+  const store = await readStore(storePath);
+  const index = store.subscriptions.findIndex((item) => item.id === id);
+  if (index < 0) {
+    throw new Error(`unknown subscription: ${id}`);
+  }
+  const subscription = store.subscriptions[index];
+  const operation = {
+    kind: "multica_issue_status",
+    issueId: subscription.issueId,
+    issueIdentifier: subscription.issueIdentifier,
+    targetStatus: "cancelled",
+    argv: ["issue", "status", subscription.issueId, "cancelled", "--output", "json"],
+    displayCommand: `multica issue status ${subscription.issueId} cancelled --output json`,
+  };
+
+  if (!execute) {
+    return {
+      ok: true,
+      mode: "dry-run",
+      confirmationRequired: true,
+      confirmationToken: CLOSE_ISSUE_SUBSCRIPTION_CONFIRMATION_TOKEN,
+      subscription: projectSubscription(subscription),
+      operation,
+    };
+  }
+
+  if (confirm !== CLOSE_ISSUE_SUBSCRIPTION_CONFIRMATION_TOKEN) {
+    return {
+      ok: false,
+      blocked: true,
+      reason: "close_subscription_confirmation_required",
+      confirmationRequired: true,
+      confirmationToken: CLOSE_ISSUE_SUBSCRIPTION_CONFIRMATION_TOKEN,
+      subscription: projectSubscription(subscription),
+      operation,
+    };
+  }
+
+  if (typeof exec !== "function") {
+    throw new Error("exec function is required for subscription close");
+  }
+
+  const result = await exec(operation.argv);
+  if (result.code !== 0) {
+    return {
+      ok: false,
+      mode: "execute",
+      reason: "multica_issue_status_failed",
+      error: summarizeResult(result) || "multica issue status failed",
+      subscription: projectSubscription(subscription),
+      operation,
+    };
+  }
+
+  const parsed = parseJsonOrNull(result.stdout) || {};
+  const closed = normalizeSubscription({
+    ...subscription,
+    issueIdentifier: String(parsed.identifier ?? subscription.issueIdentifier ?? ""),
+    title: String(parsed.title ?? subscription.title ?? ""),
+    state: "completed",
+    lastKnownStatus: String(parsed.status ?? parsed.state ?? "cancelled"),
+    lastSyncedAt: now,
+    nextSyncAfter: addMs(Date.parse(now), DEFAULT_INTERVAL_MS * 10),
+    error: "",
+    updatedAt: now,
+  });
+  store.subscriptions[index] = closed;
+  store.updatedAt = now;
+  await writeStore(storePath, store);
+  return {
+    ok: true,
+    mode: "execute",
+    subscription: projectSubscription(closed),
+    operation,
+  };
 }
 
 export async function syncIssueSubscriptions({

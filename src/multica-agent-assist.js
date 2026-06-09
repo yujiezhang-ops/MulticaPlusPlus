@@ -248,6 +248,76 @@ export async function startMulticaAgentForPlanSplit({
   });
 }
 
+export async function replyToMulticaAssistIssue({
+  issueId = "",
+  issueIdentifier = "",
+  message = "",
+  assistRequestId = "",
+  agent,
+  cliPath = "multica",
+  exec,
+} = {}) {
+  if (!issueId) {
+    return { ok: false, blocked: true, reason: "multica_assist_issue_missing", diagnostic: {} };
+  }
+  const cleanMessage = String(message || "").trim();
+  if (!cleanMessage) {
+    return { ok: false, blocked: true, reason: "assist_reply_message_required", diagnostic: {} };
+  }
+
+  const run = exec ?? createMulticaExec({ cliPath, timeoutMs: DEFAULT_COMMAND_TIMEOUT_MS });
+  const tempDir = await mkdtemp(join(tmpdir(), "multica-agent-reply-"));
+  const messageFile = join(tempDir, "reply.md");
+  const diagnostic = {
+    issue: stripEmpty({ id: String(issueId), identifier: issueIdentifier ? String(issueIdentifier) : undefined }),
+    agent: agent ? sanitizeAssistAgent(agent) : undefined,
+  };
+
+  try {
+    await writeFile(messageFile, buildAssistReplyMessage({ message: cleanMessage, assistRequestId }), "utf8");
+    const commentResult = await runJsonCommand(run, [
+      "issue",
+      "comment",
+      "create",
+      String(issueId),
+      "--message-file",
+      messageFile,
+      "--output",
+      "json",
+    ]);
+    diagnostic.comment = summarizeCommandResult(commentResult);
+    if (!commentResult.ok) {
+      return blockedResult(classifyMulticaCommandFailure(commentResult), diagnostic);
+    }
+
+    const rerunResult = await runJsonCommand(run, ["issue", "rerun", String(issueId), "--output", "json"]);
+    diagnostic.rerun = summarizeCommandResult(rerunResult);
+    if (!rerunResult.ok) {
+      return blockedResult(classifyMulticaCommandFailure(rerunResult), diagnostic);
+    }
+
+    const subscriberResult = await runJsonCommand(run, ["issue", "subscriber", "add", String(issueId), "--output", "json"]);
+    diagnostic.subscriber = summarizeCommandResult(subscriberResult);
+
+    return {
+      ok: true,
+      pending: true,
+      status: "pending",
+      assist: stripEmpty({
+        agent: agent ? sanitizeAssistAgent(agent) : undefined,
+        issue: stripEmpty({ id: String(issueId), identifier: issueIdentifier ? String(issueIdentifier) : undefined }),
+        run: sanitizeRunForSummary(rerunResult.data),
+        comment: sanitizeComment(commentResult.data),
+      }),
+      assistRequestId,
+      diagnostic: redactObject(diagnostic),
+      warnings: subscriberResult.ok ? [] : ["assist_issue_subscribe_unavailable"],
+    };
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 export function parseAgentJsonResponse(rawText) {
   const text = String(rawText ?? "").trim();
   if (!text) {
@@ -772,6 +842,14 @@ function sanitizeIssue(issue = {}) {
   });
 }
 
+function sanitizeComment(comment = {}) {
+  return stripEmpty({
+    id: String(comment.id ?? comment.comment_id ?? comment.commentId ?? ""),
+    issueId: String(comment.issue_id ?? comment.issueId ?? ""),
+    createdAt: String(comment.created_at ?? comment.createdAt ?? ""),
+  });
+}
+
 function sanitizeRun(run = {}) {
   return stripEmpty({
     id: String(run.id ?? run.task_id ?? run.taskId ?? ""),
@@ -801,6 +879,17 @@ function sanitizeRunForSummary(run = {}) {
     completedAt: String(run.completedAt ?? run.completed_at ?? ""),
     error: truncate(redactText(run.error ?? ""), 280),
   });
+}
+
+function buildAssistReplyMessage({ message, assistRequestId = "" }) {
+  return [
+    "Multica++ assist follow-up reply.",
+    "Please use this reply as additional Goal clarification context and return JSON only.",
+    assistRequestId ? `assistRequestId: ${assistRequestId}` : "",
+    "",
+    "User clarification answer:",
+    String(message || ""),
+  ].filter((line) => line !== "").join("\n");
 }
 
 function selectLatestRun(runs) {
@@ -900,6 +989,7 @@ function createMulticaExec({ cliPath = "multica", timeoutMs = DEFAULT_COMMAND_TI
 
 function buildGoalClarificationPrompt({ request, context, language, assistChainId = "", assistRequestId = "" }) {
   const normalizedLanguage = normalizeLanguage(language);
+  const clarificationContext = context?.clarification;
   return [
     "You are a Multica Agent assisting Multica++ with Goal clarification.",
     "This assist issue is a real Multica task, but your output must be analysis only.",
@@ -918,9 +1008,14 @@ function buildGoalClarificationPrompt({ request, context, language, assistChainI
     "Context JSON:",
     JSON.stringify(context ?? {}, null, 2),
     "",
+    "Clarification context JSON:",
+    JSON.stringify(clarificationContext ?? {}, null, 2),
+    "",
     "Guardrails:",
     "- Produce a Goal draft only; do not generate Plan steps here.",
     "- If ambiguous, set status to draft and ask concrete clarification questions.",
+    "- If Clarification context JSON includes a user answer, use it together with the raw request and previous draft; 优先尝试生成 status 为 clarified.",
+    "- If the user answer is still insufficient, keep status as draft and ask only the remaining concrete clarification questions.",
     "- If actionable, set status to clarified and provide success criteria, scope, constraints, risks, and any remaining questions.",
     "- Do not expose, request, infer, copy, or log secrets.",
     "- Do not change public schema, permission boundaries, skills, metadata, or collaboration roles.",

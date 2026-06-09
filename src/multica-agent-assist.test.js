@@ -9,6 +9,7 @@ import {
   invokeMulticaAgentForGoalClarification,
   invokeMulticaAgentForPlanSplit,
   parseAgentJsonResponse,
+  replyToMulticaAssistIssue,
   selectAssistAgent,
 } from "./multica-agent-assist.js";
 
@@ -104,6 +105,78 @@ test("invokes Multica agent for goal clarification through issue create and issu
   assert.equal(result.assist.issue.id, "issue-1");
   assert.equal(result.assist.run.id, "run-1");
   assert.equal(calls.some((args) => args[0] === "issue" && args[1] === "create"), true);
+});
+
+test("goal clarification prompt includes prior draft questions and user answers", async () => {
+  const exec = async (args) => {
+    const key = args.join(" ");
+    if (key.startsWith("issue create")) {
+      const promptPath = args[args.indexOf("--description-file") + 1];
+      const prompt = await readFile(promptPath, "utf8");
+      assert.match(prompt, /Clarification context JSON/);
+      assert.match(prompt, /实时性阈值是多少/);
+      assert.match(prompt, /5 分钟内/);
+      assert.match(prompt, /优先尝试生成 status 为 clarified/);
+      return jsonResult({ id: "issue-clarify", identifier: "SPA-101", title: "assist", status: "todo" });
+    }
+    if (key === "issue subscriber add issue-clarify --output json") return jsonResult({ ok: true });
+    if (key === "issue runs issue-clarify --output json") {
+      return jsonResult([{ id: "run-clarify", status: "completed", result: { output: JSON.stringify(sampleGoalDraft()) } }]);
+    }
+    throw new Error(`unexpected command: ${key}`);
+  };
+
+  const result = await invokeMulticaAgentForGoalClarification({
+    agent: { id: "agent-lead", name: "Claude-Lead", model: "pa/claude-opus" },
+    request: "搭建 GitHub 项目审查器",
+    context: {
+      project: "MulticaPlusPlus",
+      clarification: {
+        questions: ["实时性阈值是多少？"],
+        answer: "5 分钟内完成审查并回写 PR 评论。",
+        previousGoal: { id: "goal-draft", status: "draft", title: "需要澄清的目标" },
+      },
+    },
+    exec,
+  });
+
+  assert.equal(result.ok, true);
+});
+
+test("replies to an existing assist issue inbox without creating a new issue", async () => {
+  const calls = [];
+  const exec = async (args) => {
+    calls.push(args);
+    const key = args.join(" ");
+    if (key.startsWith("issue comment create issue-goal")) {
+      assert.ok(args.includes("--message-file"));
+      const messagePath = args[args.indexOf("--message-file") + 1];
+      const message = await readFile(messagePath, "utf8");
+      assert.match(message, /5 分钟内/);
+      assert.match(message, /request_goal_followup/);
+      return jsonResult({ id: "comment-followup", issue_id: "issue-goal" });
+    }
+    if (key === "issue rerun issue-goal --output json") {
+      return jsonResult({ id: "run-followup", status: "queued" });
+    }
+    if (key === "issue subscriber add issue-goal --output json") {
+      return jsonResult({ ok: true });
+    }
+    throw new Error(`unexpected command: ${key}`);
+  };
+
+  const result = await replyToMulticaAssistIssue({
+    issueId: "issue-goal",
+    message: "5 分钟内完成审查并回写 PR 评论。",
+    assistRequestId: "request_goal_followup",
+    exec,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.pending, true);
+  assert.equal(result.assist.issue.id, "issue-goal");
+  assert.equal(result.assistRequestId, "request_goal_followup");
+  assert.equal(calls.some((args) => args[0] === "issue" && args[1] === "create"), false);
 });
 
 test("invokes Multica agent for plan splitting and parses fenced JSON output", async () => {

@@ -59,11 +59,41 @@ once public releases are cut.
 - Rewrote the root `README.md` as a Chinese-first quick-start user manual for
   the GUI Goal -> Plan -> Issue workflow, subscription tracking, CLI commands,
   and write-safety boundaries.
+- Added a GUI topbar `隐藏内容` control that temporarily hides the current
+  workspace panels without deleting browser-local Goal, Plan, Issue, or
+  subscription draft state.
+- Added browser-local workflow records in the GUI `记录` page, with view,
+  new-flow, and delete-record actions that do not modify Multica.
+- Added per-subscription GUI actions for pause/resume, temporary hide, local
+  removal, and token-gated real Issue closing via
+  `multica issue status <id> cancelled --output json`.
+- Added a GUI follow-up clarification loop for draft Goals, with visible
+  clarification questions, a supplemental answer field, and resubmission through
+  `context.clarification`.
+- Added `/api/assist/reply` so draft Goal follow-up answers are posted to the
+  existing Assist Issue inbox and re-subscribed instead of creating a second
+  Goal clarification issue.
+- Added browser-local multi-workflow pending Assist tracking. Multiple Goal or
+  Plan assist issues can now run concurrently, and completed results are written
+  back to their owning workflow record instead of overwriting the current flow.
+- Added `DESIGN.md` as the desktop-first Multica++ GUI design system, documenting
+  Chinese-first copy, desktop workspace constraints, low-saturation gradients,
+  transitional cards, and Multica write-safety boundaries.
 
 ### Changed
 
 - Switched the static GUI shell and core interaction copy to Chinese-first
   labels while preserving CLI commands, product terms, and write boundaries.
+- Changed the GUI `记录` page from a single long vertical stack into a compact
+  dashboard with overview metrics, workflow-record cards, subscription lanes,
+  and a secondary page-event panel.
+- Refined the `记录` page using the installed Stitch `design-md` guidance:
+  subscription lanes now keep readable text width, avoid single-character
+  wrapping, and move row actions below the subscription summary on narrow cards.
+- Started the first desktop-first GUI refactor: the console now uses a wider
+  workbench canvas, low-saturation status gradients, transitional management
+  cards, and a clearer Records dashboard hierarchy while keeping mobile as a
+  no-overflow fallback rather than the primary target.
 - Extended Plan issue preview to support `planSet` inputs with one issue
   candidate per parallel sub-plan.
 - Split the GUI `Permissions` page from the `Control` page so Goal/Plan and
@@ -93,6 +123,16 @@ once public releases are cut.
 - Increased the GUI Multica Agent assist default run timeout to 300000ms so
   real Goal clarification and Plan splitting runs do not time out before the
   core assist backend default.
+- Moved GUI `Issue 执行跟踪` subscription management from the Plan page into
+  the `记录` page, where it now sits with browser-local workflow records. The
+  Plan page keeps only the Goal -> Plan -> Issue execution path and a compact
+  Records-page entry.
+- Kept draft Goals un-lockable while making the blocked state actionable:
+  users now answer clarification questions and rerun Goal normalization instead
+  of being left with only a disabled `锁定目标` button.
+- Changed GUI draft Goal follow-up submission to use the current Assist Issue
+  reply/comment path before falling back to a fresh normalization only when no
+  assist inbox issue exists.
 
 ### Fixed
 

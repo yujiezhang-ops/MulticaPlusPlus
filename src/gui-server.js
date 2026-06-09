@@ -30,6 +30,7 @@ import {
 } from "./goal-plan.js";
 import { diagnoseLlmProvider, discoverLlmProviders, readLlmSecretMetadata } from "./llm-assist.js";
 import {
+  closeIssueSubscription,
   deleteIssueSubscription,
   listIssueSubscriptions,
   registerIssueSubscription,
@@ -40,6 +41,7 @@ import {
   checkMulticaAgentAssistResult,
   diagnoseAssistAgents,
   discoverAssistAgents,
+  replyToMulticaAssistIssue,
   selectAssistAgent,
   providerFromAssistAgent,
   startMulticaAgentForGoalClarification,
@@ -152,6 +154,19 @@ export async function createGuiServer({
         });
         return;
       }
+      const subscriptionCloseMatch = requestPathname(request).match(/^\/api\/issue-subscriptions\/([^/]+)\/close$/);
+      if (request.method === "POST" && subscriptionCloseMatch) {
+        await handleIssueSubscriptionClose({
+          request,
+          response,
+          auditPath,
+          subscriptionStorePath,
+          cliPath,
+          exec,
+          id: decodeURIComponent(subscriptionCloseMatch[1]),
+        });
+        return;
+      }
       const subscriptionDeleteMatch = requestPathname(request).match(/^\/api\/issue-subscriptions\/([^/]+)$/);
       if (request.method === "DELETE" && subscriptionDeleteMatch) {
         await handleIssueSubscriptionDelete({
@@ -194,6 +209,16 @@ export async function createGuiServer({
       }
       if (request.method === "POST" && request.url === "/api/assist/result") {
         await handleAssistResult({
+          request,
+          response,
+          auditPath,
+          cliPath,
+          assistExec: assistExec ?? exec,
+        });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/assist/reply") {
+        await handleAssistReply({
           request,
           response,
           auditPath,
@@ -821,6 +846,48 @@ async function handleAssistResult({
   });
 }
 
+async function handleAssistReply({
+  request,
+  response,
+  auditPath,
+  cliPath,
+  assistExec,
+}) {
+  const body = await readJsonBody(request);
+  const language = normalizeRequestLanguage(body);
+  const result = await replyToMulticaAssistIssue({
+    issueId: body.issueId,
+    issueIdentifier: body.issueIdentifier,
+    message: body.message || body.context?.clarification?.answer || "",
+    assistRequestId: body.assistRequestId,
+    agent: body.agent,
+    cliPath,
+    exec: assistExec,
+  });
+
+  await appendAuditEvent(auditPath, {
+    timestamp: new Date().toISOString(),
+    source: "gui-server",
+    event_type: "assist_inbox_reply_sent",
+    mode: body.kind || "assist",
+    status: result.ok ? "pending" : "blocked",
+    blocked_reason: result.ok ? "" : result.reason,
+    issue_id: body.issueId || "",
+    issue_identifier: body.issueIdentifier || "",
+    assist_request_id: body.assistRequestId || "",
+    agent_id: body.agent?.id || result.assist?.agent?.id || "",
+    agent_name: body.agent?.name || result.assist?.agent?.name || "",
+    language,
+  });
+
+  sendJson(response, result.ok ? 200 : 200, {
+    ...result,
+    kind: body.kind || "assist",
+    issueId: body.issueId,
+    issueIdentifier: body.issueIdentifier,
+  });
+}
+
 async function handleAssistSubscribe({
   request,
   response,
@@ -1172,6 +1239,54 @@ async function handleIssueSubscriptionState({ response, subscriptionStorePath, i
 async function handleIssueSubscriptionDelete({ response, subscriptionStorePath, id }) {
   const result = await deleteIssueSubscription({ storePath: subscriptionStorePath, id });
   sendJson(response, 200, result);
+}
+
+async function handleIssueSubscriptionClose({
+  request,
+  response,
+  auditPath,
+  subscriptionStorePath,
+  cliPath,
+  exec,
+  id,
+}) {
+  const body = await readJsonBody(request);
+  try {
+    const result = await closeIssueSubscription({
+      storePath: subscriptionStorePath,
+      id,
+      exec: exec ?? createGuiCliExec({ cliPath }),
+      execute: body.execute === true,
+      confirm: body.confirm || "",
+    });
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "issue_subscription_close",
+      status: result.ok ? (result.mode === "execute" ? "success" : "planned") : "blocked",
+      subscription_id: result.subscription?.id ?? id,
+      issue_id: result.subscription?.issueId ?? "",
+      issue_identifier: result.subscription?.issueIdentifier ?? "",
+      kind: result.subscription?.kind ?? "",
+      target_status: result.operation?.targetStatus ?? "cancelled",
+      blocked_reason: result.ok ? "" : result.reason ?? "",
+      error: result.ok ? "" : result.error ?? "",
+    });
+    const status = result.ok ? 200 : (result.blocked ? 403 : 500);
+    sendJson(response, status, { ok: result.ok, result });
+  } catch (error) {
+    const message = error.message || String(error);
+    await appendAuditEvent(auditPath, {
+      timestamp: new Date().toISOString(),
+      source: "gui-server",
+      event_type: "issue_subscription_close",
+      status: "failed",
+      subscription_id: id,
+      target_status: "cancelled",
+      error: message,
+    });
+    sendJson(response, 500, { ok: false, error: message });
+  }
 }
 
 async function handleLlmProviders({

@@ -1021,6 +1021,7 @@ function buildGoalPlanSplitPrompt({ goal, constraints }) {
 }
 
 function buildGoalClarificationPrompt({ request, context }) {
+  const clarificationContext = context?.clarification;
   return [
     "You are assisting Multica++ with clarifying a fuzzy user request into a Goal draft.",
     "Return JSON only. Do not return Markdown, comments, or prose outside JSON.",
@@ -1031,9 +1032,14 @@ function buildGoalClarificationPrompt({ request, context }) {
     "Context JSON:",
     JSON.stringify(context ?? {}, null, 2),
     "",
+    "Clarification context JSON:",
+    JSON.stringify(clarificationContext ?? {}, null, 2),
+    "",
     "Guardrails:",
     "- Produce a Goal draft only; do not generate Plan steps here.",
     "- If the request is ambiguous, set status to draft and ask concrete clarification questions.",
+    "- If Clarification context JSON includes a user answer, use it together with the raw request and previous draft; prefer status clarified when the answer makes the Goal actionable.",
+    "- If the user answer is still insufficient, keep status as draft and ask only the remaining concrete clarification questions.",
     "- If the request is actionable, set status to clarified and provide success criteria, scope, constraints, risks, and any remaining questions.",
     "- preview-first: never call Multica CLI or write Multica state.",
     "- do not change public schema, permission boundaries, skills, metadata, or collaboration roles without explicit human confirmation.",

@@ -401,6 +401,97 @@ test("gui server subscription sync uses read-only issue commands and exposes gro
   }
 });
 
+test("gui server previews and confirms closing a subscribed Multica issue", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-subscription-close-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const subscriptionStorePath = join(dir, "issue-subscriptions.json");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      subscriptionStorePath,
+      exec: async (args) => {
+        calls.push(args);
+        if (args[0] === "issue" && args[1] === "create") {
+          return jsonResult({ id: "business-close-1", identifier: "SPA-401", title: args[args.indexOf("--title") + 1], status: "todo" });
+        }
+        if (args[0] === "issue" && args[1] === "metadata" && args[2] === "set") {
+          return jsonResult({ ok: true });
+        }
+        if (args.join(" ") === "issue status business-close-1 cancelled --output json") {
+          return {
+            code: 0,
+            stdout: JSON.stringify({ id: "business-close-1", identifier: "SPA-401", status: "cancelled" }),
+            stderr: "token=secret-value",
+          };
+        }
+        throw new Error(`unexpected ${args.join(" ")}`);
+      },
+    });
+
+    try {
+      const issueSplit = {
+        ...sampleIssueSplit(),
+        issues: [sampleIssueSplit().issues[0]],
+      };
+      const apply = await fetch(`http://127.0.0.1:${server.port}/api/plan/apply-issues`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ issueSplit, execute: true, confirm: "APPLY-MULTICA-ISSUE-SPLIT" }),
+      });
+      assert.equal(apply.status, 200);
+
+      const listResponse = await fetch(`http://127.0.0.1:${server.port}/api/issue-subscriptions`);
+      const listPayload = await listResponse.json();
+      const subscriptionId = listPayload.subscriptions[0].id;
+
+      const preview = await fetch(`http://127.0.0.1:${server.port}/api/issue-subscriptions/${encodeURIComponent(subscriptionId)}/close`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ execute: false }),
+      });
+      assert.equal(preview.status, 200);
+      const previewPayload = await preview.json();
+      assert.equal(previewPayload.ok, true);
+      assert.equal(previewPayload.result.mode, "dry-run");
+      assert.equal(calls.filter((args) => args[1] === "status").length, 0);
+
+      const blocked = await fetch(`http://127.0.0.1:${server.port}/api/issue-subscriptions/${encodeURIComponent(subscriptionId)}/close`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ execute: true, confirm: "WRONG" }),
+      });
+      assert.equal(blocked.status, 403);
+      assert.equal(calls.filter((args) => args[1] === "status").length, 0);
+
+      const closed = await fetch(`http://127.0.0.1:${server.port}/api/issue-subscriptions/${encodeURIComponent(subscriptionId)}/close`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ execute: true, confirm: "CLOSE-MULTICA-SUBSCRIBED-ISSUE" }),
+      });
+      assert.equal(closed.status, 200);
+      const closedPayload = await closed.json();
+      assert.equal(closedPayload.ok, true);
+      assert.equal(closedPayload.result.subscription.state, "completed");
+      assert.equal(closedPayload.result.subscription.lastKnownStatus, "cancelled");
+      assert.deepEqual(calls.filter((args) => args[1] === "status"), [["issue", "status", "business-close-1", "cancelled", "--output", "json"]]);
+
+      const auditText = await readFile(auditPath, "utf8");
+      const auditEvents = auditText.trim().split("\n").map((line) => JSON.parse(line));
+      assert.equal(auditEvents.at(-1).event_type, "issue_subscription_close");
+      assert.equal(auditEvents.at(-1).status, "success");
+      assert.equal(auditEvents.at(-1).target_status, "cancelled");
+      assert.equal(auditText.includes("secret-value"), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("gui server normalizes a goal through LLM with a mock provider", async () => {
   const dir = await mkdtemp(join(tmpdir(), "multica-gui-goal-llm-"));
   try {
@@ -669,6 +760,65 @@ test("gui server starts async Multica Agent goal clarification and later reads c
       assert.equal(resultPayload.goal.title, sampleLlmGoalDraft().title);
       assert.equal(resultPayload.diagnostic.outputSource, "comments");
       assert.equal(calls.filter((args) => args[0] === "issue" && args[1] === "create").length, 1);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("gui server replies to an existing assist inbox without creating a new goal issue", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multica-gui-assist-reply-"));
+  try {
+    const auditPath = join(dir, "audit.jsonl");
+    const calls = [];
+    const server = await createGuiServer({
+      port: 0,
+      host: "127.0.0.1",
+      auditPath,
+      assistExec: mockAssistExec({
+        calls,
+        planDraft: sampleLlmPlanDraft(),
+        goalDraft: sampleLlmGoalDraft(),
+        asyncRuns: true,
+      }),
+    });
+
+    try {
+      const replyResponse = await fetch(`http://127.0.0.1:${server.port}/api/assist/reply`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "goal",
+          issueId: "issue-goal",
+          issueIdentifier: "SPA-99",
+          request: "搭建 GitHub 审查器",
+          assistRequestId: "request_goal_followup",
+          message: "实时性目标为 5 分钟内；审查结果回写到 PR 评论。",
+          context: {
+            clarification: {
+              questions: ["实时性阈值是多少？"],
+              answer: "实时性目标为 5 分钟内；审查结果回写到 PR 评论。",
+            },
+          },
+          language: "zh-CN",
+        }),
+      });
+
+      assert.equal(replyResponse.status, 200);
+      const payload = await replyResponse.json();
+      assert.equal(payload.ok, true);
+      assert.equal(payload.pending, true);
+      assert.equal(payload.assist.issue.id, "issue-goal");
+      assert.equal(payload.assistRequestId, "request_goal_followup");
+      assert.equal(calls.some((args) => args[0] === "issue" && args[1] === "comment" && args[2] === "create"), true);
+      assert.equal(calls.some((args) => args[0] === "issue" && args[1] === "create"), false);
+
+      const auditEvents = (await readFile(auditPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      assert.equal(auditEvents.at(-1).event_type, "assist_inbox_reply_sent");
+      assert.equal(auditEvents.at(-1).issue_id, "issue-goal");
+      assert.equal(JSON.stringify(auditEvents).includes("5 分钟内"), false);
     } finally {
       await server.close();
     }
@@ -1529,6 +1679,12 @@ function mockAssistExec({
     }
     if (args[0] === "issue" && args[1] === "subscriber" && args[2] === "add") {
       return jsonResult({ ok: true, issue_id: args[3] });
+    }
+    if (args[0] === "issue" && args[1] === "comment" && args[2] === "create") {
+      return jsonResult({ id: "comment-followup", issue_id: args[3] });
+    }
+    if (args[0] === "issue" && args[1] === "rerun") {
+      return jsonResult({ id: args[2] === "issue-goal" ? "run-goal-followup" : "run-plan-followup", status: "queued" });
     }
     if (key === "issue runs issue-goal --output json") {
       if (asyncRuns) {

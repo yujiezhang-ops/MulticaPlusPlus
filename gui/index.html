@@ -99,6 +99,10 @@
           </div>
 
           <div class="topbar-actions">
+            <button type="button" id="toggle-content-visibility" class="outline-button content-visibility-button" data-action="toggle-content-visibility" aria-pressed="false">
+              <span class="button-icon nav-icon-eye" aria-hidden="true"></span>
+              <span id="content-visibility-label">隐藏内容</span>
+            </button>
             <button type="button" id="configure-agent-permissions" class="outline-button" data-action="open-permissions">
               <span class="button-icon nav-icon-lock" aria-hidden="true"></span>
               <span>配置权限</span>
@@ -108,6 +112,18 @@
         </header>
 
         <main class="views">
+          <section id="content-privacy-placeholder" class="content-privacy-placeholder" hidden>
+            <div>
+              <span class="section-label">临时隐藏</span>
+              <h1>当前内容已隐藏</h1>
+              <p>Goal、Plan、Issue 预览和订阅结果仍保留在本地草稿中；这里只是暂时不展示当前工作区内容。</p>
+            </div>
+            <button type="button" class="primary-button" data-action="show-workspace-content">
+              <span class="button-icon nav-icon-eye" aria-hidden="true"></span>
+              <span>显示内容</span>
+            </button>
+          </section>
+
           <section id="view-control" class="control-grid" data-view="control">
             <section id="goal-panel" class="panel" aria-labelledby="goal-heading">
               <header class="panel-header">

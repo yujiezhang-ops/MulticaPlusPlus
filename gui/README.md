@@ -30,6 +30,11 @@ http://127.0.0.1:8787/
 ## 当前范围
 
 - 纯 HTML/CSS/JS 实现。
+- 当前设计目标是桌面 Web 控制台，主要面向 1280px-1600px 宽度的浏览器工作区；
+  窄屏只保证单列兜底和无横向溢出，不作为本轮主要体验。
+- 视觉基调是深色/中性 Multica 控制台，允许少量低饱和渐变、过渡型卡片和柔和
+  状态光，用于区分执行态、历史态和订阅态；不做营销 hero 或装饰堆叠。
+- 仓库根目录的 `DESIGN.md` 是后续 Stitch 生成或人工重构 GUI 时的设计系统入口。
 - 直接打开静态页面时，浏览器页面只使用本地预览数据。
 - 通过 `npm run gui` 打开时，Image2 按钮会调用本地 API 执行真实 Multica CLI。
 - 首屏为 `控制台`，采用 `目标` + `计划` 两栏工作区。
@@ -39,6 +44,15 @@ http://127.0.0.1:8787/
 - 当前 UI 文案以中文为默认语言，`设置` 中预留了 `English` 切换入口。
 - 当前语言会随 Goal 澄清、Plan 拆分和 Issue 预览请求传给本地 server；默认
   `zh-CN`，因此 Agent 输出的可视化 Goal / Plan / Issue 文案也应为中文。
+- 顶栏的 `隐藏内容` 只会临时隐藏当前工作区面板，方便暂时遮住已展示的
+  Goal / Plan / Issue / 订阅内容；它不会清空浏览器本地草稿，也不会停止订阅或
+  触发任何 Multica 写入。点击 `显示内容` 可以恢复。
+- `记录` 页统一管理浏览器本地工作流快照和 Issue 订阅，采用 dashboard 布局：
+  顶部是概览指标，主体按区块管理工作流记录和 Issue 执行跟踪。订阅按 lane
+  分组展示，行内文本优先保留可读宽度，操作按钮收纳为短标签。删除记录只删除
+  本地快照；新建流程只清空当前 Goal / Plan / Issue 草稿，历史记录和订阅表仍保留。
+- 多个流程可以同时等待不同的 Assist Issue。每个 pending assist 都绑定到自己的
+  工作流记录；后台结果完成时只更新所属记录，不会覆盖当前正在查看的新流程。
 - `计划` 面板提供 `Agent 辅助拆分为多个 Plan`：只有 locked Goal 可通过本机
   `multica` CLI 选择或自动选择一个 Multica Agent，创建或复用该 Goal 链路的
   固定 assist inbox issue，并订阅该 issue 的收件箱结果；无可用 Agent 时显示
@@ -60,6 +74,8 @@ http://127.0.0.1:8787/
   恢复 / 继续入口。
 - `计划`：明确展示 `Goal -> Plan -> Issue` 路径，展示有序步骤、
   pending/running/done/blocked 状态、依赖关系、当前执行项高亮和阻塞原因。
+  该页只保留执行链路、Plan/PlanSet 展示、业务 Issue preview 和创建入口；
+  订阅管理和历史快照通过页内入口跳转到 `记录` 页集中处理。
 
 ## 权限页面
 
@@ -132,9 +148,10 @@ Codex Agent` preset 还提供 `Create Image2 Codex Agent`，通过本地 GUI ser
   `APPLY-MULTICA-ISSUE-SPLIT` 后，GUI server 才会调用 `/api/plan/apply-issues`
   创建真实业务 Issue 并写 metadata。已创建的候选会显示 `打开 Issue` 和
   `复制 Issue ID`，再次批量创建时会跳过已创建候选。
-- `Issue 执行跟踪` 会读取本地订阅表，分组展示 `Assist Goal`、`Assist Plan` 和
-  `Business Issues`。前端只维护一个 60 秒聚合轮询 loop，不为每个 issue 单独建
-  连接；同步最多读取 30 个活跃订阅。
+- `记录` 页中的 `Issue 执行跟踪` 会读取本地订阅表，分组展示 `Assist Goal`、
+  `Assist Plan` 和 `Business Issues`。前端只维护一个 60 秒聚合轮询 loop，不为
+  每个 issue 单独建连接；同步最多读取 30 个活跃订阅。Plan 页不会堆叠订阅管理
+  卡片，只提供进入 `记录` 页的轻量入口。
 - Plan 当前步骤高亮。
 - 权限模板、TTL 和审批开关改变本地预览。
 - Preview / Apply 按钮只写入页面内 mock record。
@@ -156,13 +173,22 @@ GUI 的 `澄清目标` 会 POST `/api/goal/normalize`，body 中包含 `mode: "a
 本机 `multica` CLI 发现 Agent，为当前 Goal 链路创建或复用一个固定 assist inbox
 issue，订阅该 issue，并立即返回 pending。浏览器随后通过 `/api/assist/subscribe`
 实时订阅该 issue；如果页面刷新，会从 localStorage 恢复 pending assist 并继续
-订阅同一个 issue，不会重新创建 assist task。
+订阅同一个 issue，不会重新创建 assist task。若用户在一个 assist 运行中点击
+`新建流程` 并启动另一个 assist，浏览器会并行轮询两条 pending assist；旧流程
+结果写回对应工作流记录，新流程结果只更新当前页面。
 
 结果读取顺序是 run `result.output` -> `issue run-messages` -> `issue comment list`。
 真实 Agent 若只在 run output 写中文摘要、把完整 JSON 写到 issue comment，GUI
 也会从 comment 中恢复 Goal draft。Multica Agent prompt 会要求 JSON key 保持英文，
 同时所有用户可见 value 按当前语言输出。服务端只接受语义字段，可信的 `id`、
 时间戳、owner、source、project 和 raw request 仍由本地代码生成。
+
+如果 Agent 返回 `status: "draft"`，GUI 会保持 `锁定目标` 禁用，并显示待澄清
+问题和 `澄清补充说明` 输入区。用户填写补充说明后点击 `提交补充澄清`，浏览器会
+优先把上一版 draft Goal、待澄清问题和用户回答写入同一个 Assist Issue 的回复区，
+通过 `/api/assist/reply` 触发同一 inbox issue 继续运行，并重新订阅该 issue 的
+新返回结果；不会新建第二个 Goal 澄清 assist issue。只有后续结果变为 `clarified`
+后，`锁定目标` 才会启用。
 
 对应 CLI：
 
@@ -255,6 +281,9 @@ Image2 流程会：
   同步只调用 `multica issue list --output json`、`multica issue runs <issueId>
   --output json` 和 `multica issue comment list <issueId> --output json`，不会修改
   Multica issue。
+- 订阅行的 `暂停/恢复订阅`、`暂时隐去`、`本地移除` 都只改变 Multica++ 本地状态。
+  `关闭真实 Issue` 是真实 Multica 写入，必须输入 `CLOSE-MULTICA-SUBSCRIBED-ISSUE`，
+  并通过本地 GUI server 执行 `multica issue status <id> cancelled --output json`。
 - Agent 辅助 prompt 和本地 Issue preview 会使用当前请求语言；中文 UI 下默认生成
   中文 Plan 和 Issue 候选文案。
 - 旧 LLM 直连桥不直接发起 API key HTTP 调用，并仅在高级兼容路径中使用。

@@ -3,6 +3,16 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { Script, createContext } from "node:vm";
 
+test("GUI design system documents desktop-first Chinese console constraints", async () => {
+  const designDoc = await readFile(new URL("../DESIGN.md", import.meta.url), "utf8");
+
+  assert.ok(designDoc.includes("desktop-first operations console"));
+  assert.ok(designDoc.includes("Simplified Chinese"));
+  assert.ok(designDoc.includes("1280px to 1600px"));
+  assert.ok(designDoc.includes("low-opacity surface transitions"));
+  assert.ok(designDoc.includes("No new Multica write behavior"));
+});
+
 test("GUI button posts to the local Image2 agent creation endpoint", async () => {
   const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
   const { document, clickLog } = createTinyDocument();
@@ -440,6 +450,161 @@ test("GUI clarifies a goal, locks it, and previews issue split from the control 
   assert.ok(clickLog.includes("data-action:preview-issue-split"));
 });
 
+test("GUI lets users answer draft Goal clarification questions before locking", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document } = createTinyDocument();
+  const fetchCalls = [];
+  let normalizeCount = 0;
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/goal/normalize") {
+        normalizeCount += 1;
+        if (normalizeCount === 1) {
+          return responseJson({
+            ok: true,
+            goal: {
+              id: "goal-draft",
+              status: "draft",
+              title: "需要澄清的目标",
+              objective: "需要确认审查器实时性和回写方式。",
+              owner: "Codex",
+              source: "gui",
+              successCriteria: [],
+              clarificationQuestions: ["实时性阈值是多少？", "审查结论回写到哪里？"],
+            },
+          });
+        }
+        return responseJson({
+          ok: true,
+          goal: {
+            id: "goal-clarified",
+            status: "clarified",
+            title: "自动监听 GitHub 项目的审查器",
+            objective: "分钟级监听 push/PR 并回写结构化审查结论。",
+            owner: "Codex",
+            source: "gui",
+            successCriteria: ["push/PR 自动触发", "PR 评论可见"],
+            clarificationQuestions: [],
+          },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.querySelector("[data-action='clarify-goal']"));
+
+  document.querySelector("[data-action='clarify-goal']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='clarify-goal']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(document.querySelector("[data-action='lock-goal']").disabled, true);
+  assert.ok(document.textContent().includes("当前 Goal 仍是草稿，请先补充澄清信息。"));
+  assert.ok(document.textContent().includes("实时性阈值是多少？"));
+  assert.ok(document.textContent().includes("提交补充澄清"));
+
+  document.querySelector("[data-action='submit-goal-clarification']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='submit-goal-clarification']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/goal/normalize").length, 1);
+  assert.ok(document.textContent().includes("请先填写澄清补充说明。"));
+
+  document.querySelector("#goal-clarification-answer").value = "实时性目标为 5 分钟内；审查结论回写到 PR 评论和状态检查。";
+  document.querySelector("[data-action='submit-goal-clarification']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='submit-goal-clarification']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/goal/normalize").length, 2);
+  const secondBody = JSON.parse(fetchCalls.filter((call) => call.url === "/api/goal/normalize")[1].options.body);
+  assert.equal(secondBody.context.clarification.answer, "实时性目标为 5 分钟内；审查结论回写到 PR 评论和状态检查。");
+  assert.equal(secondBody.context.clarification.previousGoal.status, "draft");
+  assert.deepEqual(secondBody.context.clarification.questions, ["实时性阈值是多少？", "审查结论回写到哪里？"]);
+  assert.equal(document.querySelector("[data-action='lock-goal']").disabled, false);
+  assert.ok(document.textContent().includes("自动监听 GitHub 项目的审查器"));
+});
+
+test("GUI sends follow-up clarification to the existing Assist Issue inbox", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const storage = createMemoryStorage();
+  storage.setItem("multica-plusplus.workflow.v1", JSON.stringify({
+    version: 1,
+    language: "zh-CN",
+    goalRequest: "搭建 GitHub 审查器",
+    normalizedGoal: {
+      id: "goal-draft",
+      status: "draft",
+      title: "需要澄清的目标",
+      objective: "需要确认实时性和回写方式。",
+      clarificationQuestions: ["实时性阈值是多少？"],
+      successCriteria: [],
+    },
+    pendingAssist: {
+      kind: "goal",
+      label: "目标澄清",
+      issueId: "issue-goal",
+      issueIdentifier: "SPA-99",
+      agent: { id: "agent-lead", name: "Claude-Lead" },
+      assistRequestId: "request_goal_initial",
+      request: "搭建 GitHub 审查器",
+      context: { project: "MulticaPlusPlus", language: "zh-CN" },
+      language: "zh-CN",
+    },
+    goalPlanStatus: "需要澄清",
+    goalPlanFeedback: "目标仍为草稿。",
+  }));
+  const { document } = createTinyDocument();
+  const fetchCalls = [];
+
+  new Script(appSource).runInContext(createContext({
+    document,
+    window: { localStorage: storage },
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/assist/result") {
+        return responseJson({ ok: true, pending: true, status: "pending" });
+      }
+      if (url === "/api/assist/reply") {
+        const body = JSON.parse(options.body);
+        assert.equal(body.issueId, "issue-goal");
+        assert.equal(body.kind, "goal");
+        assert.equal(body.context.clarification.answer, "实时性目标为 5 分钟内；回写到 PR 评论。");
+        assert.equal(body.context.clarification.previousGoal.status, "draft");
+        return responseJson({
+          ok: true,
+          pending: true,
+          assistRequestId: "request_goal_followup",
+          assist: {
+            issue: { id: "issue-goal", identifier: "SPA-99" },
+            agent: { id: "agent-lead", name: "Claude-Lead" },
+          },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout: () => 1,
+    clearTimeout,
+    Date,
+  }));
+
+  await waitFor(() => document.querySelector("[data-action='submit-goal-clarification']"));
+  document.querySelector("#goal-clarification-answer").value = "实时性目标为 5 分钟内；回写到 PR 评论。";
+  document.querySelector("[data-action='submit-goal-clarification']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='submit-goal-clarification']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(fetchCalls.some((call) => call.url === "/api/assist/reply"), true);
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/goal/normalize").length, 0);
+  assert.ok(storage.getItem("multica-plusplus.workflow.v1").includes("request_goal_followup"));
+  assert.ok(document.textContent().includes("已发送到 Assist Issue SPA-99"));
+});
+
 test("GUI separates Goal/Plan control and permissions into distinct pages", async () => {
   const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
   const htmlSource = await readFile(new URL("../gui/index.html", import.meta.url), "utf8");
@@ -472,6 +637,47 @@ test("GUI separates Goal/Plan control and permissions into distinct pages", asyn
   const controlNav = document.querySelector("[data-nav-target='control']");
   assert.equal(permissionsNav.getAttribute("aria-current"), "page");
   assert.equal(controlNav.getAttribute("aria-current"), "false");
+});
+
+test("GUI can temporarily hide and restore the current workspace content", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const { document, clickLog } = createTinyDocument();
+  const context = createContext({
+    document,
+    window: {},
+    fetch: async (url) => {
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  });
+
+  new Script(appSource).runInContext(context);
+  await waitFor(() => document.querySelector("[data-action='toggle-content-visibility']")?.getAttribute("aria-pressed") === "false");
+
+  const toggle = document.querySelector("[data-action='toggle-content-visibility']");
+  const controlView = document.querySelector("#view-control");
+  const privacyPlaceholder = document.querySelector("#content-privacy-placeholder");
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+  assert.equal(controlView.hidden, false);
+  assert.equal(privacyPlaceholder.hidden, true);
+
+  toggle.dispatchEvent({ type: "click", target: toggle });
+  assert.equal(toggle.getAttribute("aria-pressed"), "true");
+  assert.ok(document.textContent().includes("当前内容已隐藏"));
+  assert.equal(controlView.hidden, true);
+  assert.equal(privacyPlaceholder.hidden, false);
+
+  const show = document.querySelector("[data-action='show-workspace-content']");
+  show.dispatchEvent({ type: "click", target: show });
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+  assert.equal(controlView.hidden, false);
+  assert.equal(privacyPlaceholder.hidden, true);
+  assert.ok(clickLog.includes("data-action:toggle-content-visibility"));
+  assert.ok(clickLog.includes("data-action:show-workspace-content"));
 });
 
 test("GUI surfaces Multica assist issue create diagnostics during goal clarification", async () => {
@@ -993,13 +1199,177 @@ test("GUI loads and syncs issue subscriptions as one aggregate polling loop", as
     Date,
   }));
 
-  await waitFor(() => document.textContent().includes("Issue 执行跟踪"));
-  assert.ok(document.textContent().includes("Assist Goal"));
-  assert.ok(document.textContent().includes("Assist Plan"));
-  assert.ok(document.textContent().includes("Business Issues"));
-  assert.ok(document.textContent().includes("SPA-12"));
+  await waitFor(() => document.textContent().includes("订阅和历史记录在记录页管理"));
+  assert.equal(document.querySelector("#plan-list").textContentDeep().includes("Issue 执行跟踪"), false);
+  assert.equal(document.querySelector("#plan-list").textContentDeep().includes("暂停订阅"), false);
+  assert.equal(document.querySelector("#plan-list").textContentDeep().includes("关闭真实 Issue"), false);
+
+  const recordsEntry = document.querySelector("[data-action='open-records']");
+  assert.ok(recordsEntry, "Plan page should render a compact records entry");
+  recordsEntry.dispatchEvent({ type: "click", target: recordsEntry });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("工作流记录"));
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("Issue 执行跟踪"));
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("记录与 Issue 订阅"));
+  assert.ok(document.querySelector(".records-dashboard"), "records page should render as a dashboard");
+  assert.ok(document.querySelector(".records-overview-grid"), "records page should include overview metrics");
+  assert.ok(document.querySelector(".records-main-grid"), "records page should split workflow and subscription panels");
+  assert.ok(document.querySelector(".subscription-lane-board"), "subscription groups should render as lanes");
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("Assist Goal"));
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("Assist Plan"));
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("Business Issues"));
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("SPA-12"));
   assert.equal(fetchCalls.filter((call) => call.url === "/api/issue-subscriptions").length, 1);
   assert.equal(timers.includes(60000), true);
+});
+
+test("GUI records workflow snapshots and manages subscribed issue rows", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const storage = createMemoryStorage();
+  storage.setItem("multica-plusplus.workflow.v1", JSON.stringify({
+    version: 1,
+    savedAt: "2026-06-08T00:00:00.000Z",
+    goalRequest: "历史需求",
+    normalizedGoal: { id: "goal-old", title: "历史 Goal", objective: "恢复历史目标", status: "clarified" },
+    lockedGoal: { id: "goal-old", title: "历史 Goal", objective: "恢复历史目标", status: "locked" },
+    planSet: { id: "plan_set_old", plans: [{ id: "sub-1", number: 1, title: "历史 Plan", objective: "恢复计划", workstream: { id: "ws", label: "工作流" }, steps: [] }] },
+    issueSplit: { id: "split-old", summary: "历史 Issue 预览", issues: [], operations: [] },
+    issueApplyResult: { createdIssues: [{ id: "business-1", identifier: "SPA-12", title: "业务 Issue" }] },
+    issueSubscriptions: [],
+    goalPlanStatus: "已预览",
+    goalPlanFeedback: "历史记录",
+  }));
+  const { document } = createTinyDocument();
+  const fetchCalls = [];
+
+  new Script(appSource).runInContext(createContext({
+    document,
+    window: { localStorage: storage },
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/issue-subscriptions") {
+        return responseJson({
+          ok: true,
+          subscriptions: [
+            {
+              id: "sub-business",
+              kind: "business_issue",
+              issueId: "business-1",
+              issueIdentifier: "SPA-12",
+              title: "业务 Issue",
+              state: "active",
+              lastKnownStatus: "in_progress",
+            },
+          ],
+        });
+      }
+      if (url === "/api/issue-subscriptions/sub-business/pause") {
+        return responseJson({
+          ok: true,
+          subscription: {
+            id: "sub-business",
+            kind: "business_issue",
+            issueId: "business-1",
+            issueIdentifier: "SPA-12",
+            title: "业务 Issue",
+            state: "paused",
+            lastKnownStatus: "in_progress",
+          },
+        });
+      }
+      if (url === "/api/issue-subscriptions/sub-business/close") {
+        const body = JSON.parse(options.body);
+        if (body.execute === true && body.confirm === "CLOSE-MULTICA-SUBSCRIBED-ISSUE") {
+          return responseJson({
+            ok: true,
+            result: {
+              ok: true,
+              mode: "execute",
+              subscription: {
+                id: "sub-business",
+                kind: "business_issue",
+                issueId: "business-1",
+                issueIdentifier: "SPA-12",
+                title: "业务 Issue",
+                state: "completed",
+                lastKnownStatus: "cancelled",
+              },
+            },
+          });
+        }
+        return responseJson({ ok: false, result: { ok: false, blocked: true, reason: "close_subscription_confirmation_required" } });
+      }
+      if (url === "/api/issue-subscriptions/sub-business") {
+        return responseJson({ ok: true, deleted: true });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  }));
+
+  await waitFor(() => document.textContent().includes("订阅和历史记录在记录页管理"));
+  assert.equal(document.querySelector("#plan-list").textContentDeep().includes("Issue 执行跟踪"), false);
+  assert.equal(document.querySelector("#plan-list").textContentDeep().includes("暂停订阅"), false);
+  assert.equal(document.querySelector("#plan-list").textContentDeep().includes("关闭真实 Issue"), false);
+
+  const recordsNav = document.querySelector("[data-nav-target='records']");
+  recordsNav.dispatchEvent({ type: "click", target: recordsNav });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(document.textContent().includes("工作流记录"));
+  assert.ok(document.textContent().includes("记录与 Issue 订阅"));
+  assert.ok(document.textContent().includes("历史 Goal"));
+  assert.ok(document.querySelector(".records-dashboard"), "records page should render dashboard shell");
+  assert.ok(document.querySelector(".workflow-record-panel"), "workflow records should be grouped in a panel");
+  assert.ok(document.querySelector(".records-activity-panel"), "page events should be moved to a secondary panel");
+  assert.ok(document.querySelector(".subscription-lane-board"), "issue subscriptions should use a lane board");
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("Issue 执行跟踪"));
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("暂停"));
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("本地移除"));
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("关闭真实 Issue"));
+
+  const newFlow = document.querySelector("[data-action='new-workflow']");
+  newFlow.dispatchEvent({ type: "click", target: newFlow });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(storage.getItem("multica-plusplus.workflow.v1").includes("实现 Goal Plan 模块"));
+  assert.ok(storage.getItem("multica-plusplus.workflow-records.v1").includes("历史 Goal"));
+
+  recordsNav.dispatchEvent({ type: "click", target: recordsNav });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const restore = document.querySelector("[data-action='restore-workflow-record']");
+  restore.dispatchEvent({ type: "click", target: restore });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(document.textContent().includes("恢复历史目标"));
+
+  document.querySelector("[data-action='pause-subscription']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='pause-subscription']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(fetchCalls.some((call) => call.url === "/api/issue-subscriptions/sub-business/pause"), true);
+  assert.ok(document.textContent().includes("paused") || document.textContent().includes("暂停"));
+
+  document.querySelector("[data-action='close-subscription']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='close-subscription']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(document.textContent().includes("必须输入 CLOSE-MULTICA-SUBSCRIBED-ISSUE"));
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/issue-subscriptions/sub-business/close").length, 0);
+
+  document.querySelector("#subscription-close-confirm").value = "CLOSE-MULTICA-SUBSCRIBED-ISSUE";
+  document.querySelector("[data-action='close-subscription']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='close-subscription']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const closeCall = fetchCalls.find((call) => call.url === "/api/issue-subscriptions/sub-business/close");
+  assert.equal(JSON.parse(closeCall.options.body).confirm, "CLOSE-MULTICA-SUBSCRIBED-ISSUE");
+  assert.ok(document.textContent().includes("cancelled"));
+
+  document.querySelector("[data-action='delete-subscription']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='delete-subscription']") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(fetchCalls.some((call) => call.url === "/api/issue-subscriptions/sub-business" && call.options.method === "DELETE"), true);
+
+  recordsNav.dispatchEvent({ type: "click", target: recordsNav });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  document.querySelector("[data-action='delete-workflow-record']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='delete-workflow-record']") });
+  assert.equal(storage.getItem("multica-plusplus.workflow-records.v1").includes("历史 Goal"), false);
 });
 
 test("GUI restores Agent-assisted PlanSet after a browser refresh", async () => {
@@ -1252,6 +1622,162 @@ test("GUI resumes a pending Assist Issue inbox after refresh without creating a 
   assert.ok(fetchCalls.some((call) => call.url === "/api/assist/result"));
 });
 
+test("GUI keeps concurrent Assist Issue results isolated by workflow", async () => {
+  const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
+  const storage = createMemoryStorage();
+  storage.setItem("multica-plusplus.workflow.v1", JSON.stringify({
+    version: 1,
+    workflowId: "workflow-one",
+    language: "zh-CN",
+    goalRequest: "流程 1：拆分 Plan",
+    lockedGoal: {
+      id: "goal-flow-one",
+      status: "locked",
+      title: "流程 1 目标",
+      objective: "需要拆分 Plan。",
+      successCriteria: ["生成 PlanSet"],
+      constraints: ["preview-first"],
+      language: "zh-CN",
+    },
+    pendingAssist: {
+      id: "pending-flow-one-plan",
+      workflowId: "workflow-one",
+      kind: "planSet",
+      label: "Plan 拆分",
+      issueId: "issue-plan-a",
+      issueIdentifier: "SPA-A",
+      assistRequestId: "request-plan-a",
+      agent: { id: "agent-lead", name: "Claude-Lead" },
+      lockedGoal: {
+        id: "goal-flow-one",
+        status: "locked",
+        title: "流程 1 目标",
+        objective: "需要拆分 Plan。",
+        successCriteria: ["生成 PlanSet"],
+        constraints: ["preview-first"],
+        language: "zh-CN",
+      },
+      language: "zh-CN",
+      timeoutMs: 300000,
+    },
+  }));
+
+  const { document } = createTinyDocument();
+  const fetchCalls = [];
+  const pendingResponses = new Map([
+    ["issue-plan-a", {
+      ok: true,
+      status: "completed",
+      diagnostic: { outputSource: "comments" },
+      assist: {
+        issue: { id: "issue-plan-a", identifier: "SPA-A" },
+        agent: { id: "agent-lead", name: "Claude-Lead" },
+        run: { id: "run-plan-a", status: "completed" },
+      },
+      planSet: {
+        id: "plan_set_flow_one",
+        status: "draft",
+        splitMode: "parallel",
+        strategy: "llm-assisted-workstreams",
+        provider: { id: "provider-multica-agent", kind: "multica-agent", source: "multica-agent" },
+        assist: {
+          issue: { id: "issue-plan-a", identifier: "SPA-A" },
+          agent: { id: "agent-lead", name: "Claude-Lead" },
+          run: { id: "run-plan-a", status: "completed" },
+        },
+        plans: [
+          {
+            id: "subplan-flow-one",
+            number: 1,
+            title: "流程 1 已完成的 Plan",
+            objective: "旧流程结果应只写回流程 1 记录。",
+            workstream: { id: "flow-one", label: "流程 1", reason: "隔离验证" },
+            suggestedAgent: "planner-agent",
+            dependencies: [],
+            steps: [{ number: 1, title: "更新流程 1", status: "pending", dependencies: [] }],
+            acceptanceEvidence: "记录中可恢复。",
+          },
+        ],
+        warnings: [],
+      },
+    }],
+    ["issue-goal-b", {
+      ok: true,
+      status: "completed",
+      diagnostic: { outputSource: "comments" },
+      assist: {
+        issue: { id: "issue-goal-b", identifier: "SPA-B" },
+        agent: { id: "agent-lead", name: "Claude-Lead" },
+        run: { id: "run-goal-b", status: "completed" },
+      },
+      goal: {
+        id: "goal-flow-two",
+        status: "clarified",
+        title: "流程 2 已澄清目标",
+        objective: "新流程当前页面应显示这个目标。",
+        successCriteria: ["流程 2 更新当前 UI"],
+        constraints: ["preview-first"],
+        risks: [],
+        clarificationQuestions: [],
+        owner: "Codex monitoring session",
+        source: "gui",
+        language: "zh-CN",
+      },
+    }],
+  ]);
+
+  new Script(appSource).runInContext(createContext({
+    document,
+    window: { localStorage: storage },
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/agent-presets") return responseJson({ ok: true, presets: [] });
+      if (url === "/api/assist/result") {
+        const body = JSON.parse(options.body);
+        return responseJson(pendingResponses.get(body.issueId) || { ok: true, pending: true, status: "pending" });
+      }
+      if (url === "/api/goal/normalize") {
+        return responseJson({
+          ok: true,
+          pending: true,
+          assistChainId: "assist-goal-b",
+          assistRequestId: "request-goal-b",
+          assist: {
+            issue: { id: "issue-goal-b", identifier: "SPA-B" },
+            agent: { id: "agent-lead", name: "Claude-Lead" },
+          },
+        });
+      }
+      if (url === "/api/plan/split") throw new Error("existing pending plan assist must not be recreated");
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+  }));
+
+  await waitFor(() => document.querySelector("[data-action='new-workflow']"));
+  document.querySelector("[data-action='new-workflow']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='new-workflow']") });
+  document.querySelector("#goal-request-input").value = "流程 2：澄清 Goal";
+  document.querySelector("[data-action='clarify-goal']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='clarify-goal']") });
+
+  await waitFor(() => document.textContent().includes("流程 2 已澄清目标"));
+
+  assert.ok(document.textContent().includes("流程 2 已澄清目标"));
+  assert.equal(document.textContent().includes("流程 1 已完成的 Plan"), false);
+
+  const draft = JSON.parse(storage.getItem("multica-plusplus.workflow.v1"));
+  assert.equal(draft.pendingAssists.length, 0);
+  assert.equal(draft.pendingAssist, null);
+
+  const records = JSON.parse(storage.getItem("multica-plusplus.workflow-records.v1")).records;
+  const flowOne = records.find((record) => record.snapshot?.workflowId === "workflow-one");
+  assert.ok(flowOne, "flow one record should still exist");
+  assert.ok(JSON.stringify(flowOne.snapshot.planSet).includes("流程 1 已完成的 Plan"));
+  assert.equal(JSON.stringify(draft.normalizedGoal).includes("流程 2 已澄清目标"), true);
+});
+
 test("GUI creates a team preset and refreshes the preset list", async () => {
   const appSource = await readFile(new URL("../gui/app.js", import.meta.url), "utf8");
   const { document, clickLog } = createTinyDocument();
@@ -1418,13 +1944,18 @@ function createTinyDocument() {
       if (selector.startsWith("#")) {
         return nodes.get(selector) ?? findNodeById(document.body, selector.slice(1));
       }
+      if (selector.startsWith(".")) {
+        return findNodeByClass(document.body, selector.slice(1));
+      }
       return nodes.get(selector) ?? null;
     },
     querySelectorAll(selector) {
       if (selector === "[data-nav-target]") {
         return Array.from(nodes.values()).filter((node) => node?.getAttribute?.("data-nav-target"));
       }
-      if (selector === "[data-view]") return [];
+      if (selector === "[data-view]") {
+        return Array.from(nodes.values()).filter((node) => node?.getAttribute?.("data-view"));
+      }
       if (selector === ".cli-command-row code") return [];
       return [];
     },
@@ -1457,6 +1988,13 @@ function createTinyDocument() {
     "#plugin-preset-list",
     "#team-preset-list",
     "#preset-detail",
+    "#content-privacy-placeholder",
+    "#view-control",
+    "#permissions-view",
+    "#activity-view",
+    "#records-view",
+    "#settings-view",
+    "#placeholder-view",
     "#preset-agent-name",
     "#preset-agent-instructions",
     "#preset-config-summary",
@@ -1474,13 +2012,30 @@ function createTinyDocument() {
   ];
   selectors.forEach((selector) => {
     const node = element(selector.replace(/^[#.]/, "div"));
+    if (selector.startsWith("#")) {
+      node.id = selector.slice(1);
+      node.setAttribute("id", selector.slice(1));
+    }
     nodes.set(selector, node);
     document.body.appendChild(node);
   });
   nodes.get("#plugin-preset-list").textContent = "插件预制体";
   nodes.get("#team-preset-list").textContent = "团队预制体";
+  nodes.get("#content-privacy-placeholder").textContent = "当前内容已隐藏";
+  [
+    ["#view-control", "control"],
+    ["#permissions-view", "permissions"],
+    ["#activity-view", "activity"],
+    ["#records-view", "records"],
+    ["#settings-view", "settings"],
+    ["#placeholder-view", "placeholder"],
+  ].forEach(([selector, view]) => {
+    nodes.get(selector).setAttribute("data-view", view);
+  });
   nodes.set("[data-action='open-agent-config']", actionButton("open-agent-config"));
   nodes.set("[data-action='open-permissions']", actionButton("open-permissions"));
+  nodes.set("[data-action='toggle-content-visibility']", actionButton("toggle-content-visibility", "toggle-content-visibility"));
+  nodes.set("[data-action='show-workspace-content']", actionButton("show-workspace-content"));
   nodes.set("[data-action='preview-selected-preset']", actionButton("preview-selected-preset"));
   nodes.set("[data-action='create-selected-preset-agent']", actionButton("create-selected-preset-agent"));
   nodes.set("[data-action='create-team-preset']", actionButton("create-team-preset"));
@@ -1488,17 +2043,26 @@ function createTinyDocument() {
   nodes.set("[data-action='create-image2-agent']", null);
   nodes.set("[data-nav-target='control']", navButton("control"));
   nodes.set("[data-nav-target='permissions']", navButton("permissions"));
+  nodes.set("[data-nav-target='records']", navButton("records"));
   document.body.appendChild(nodes.get("[data-action='open-agent-config']"));
   document.body.appendChild(nodes.get("[data-action='open-permissions']"));
+  document.body.appendChild(nodes.get("[data-action='toggle-content-visibility']"));
+  document.body.appendChild(nodes.get("[data-action='show-workspace-content']"));
   document.body.appendChild(nodes.get("[data-action='preview-selected-preset']"));
   document.body.appendChild(nodes.get("[data-action='create-selected-preset-agent']"));
   document.body.appendChild(nodes.get("[data-action='create-team-preset']"));
   document.body.appendChild(nodes.get("[data-nav-target='control']"));
   document.body.appendChild(nodes.get("[data-nav-target='permissions']"));
+  document.body.appendChild(nodes.get("[data-nav-target='records']"));
+  nodes.set("#toggle-content-visibility", nodes.get("[data-action='toggle-content-visibility']"));
 
-  function actionButton(action) {
+  function actionButton(action, id) {
     const node = element("button");
     node.setAttribute("data-action", action);
+    if (id) {
+      node.id = id;
+      node.setAttribute("id", id);
+    }
     node.dispatchEvent = (event) => {
       clickLog.push(`data-action:${action}`);
       clickHandlers.forEach((handler) => handler({ ...event, target: node }));
@@ -1574,7 +2138,8 @@ function createTinyDocument() {
         if (selector === "[data-nav-target]" && attributes.has("data-nav-target")) return this;
         return null;
       },
-      matches() {
+      matches(selector) {
+        if (selector?.startsWith("#")) return this.id === selector.slice(1) || attributes.get("id") === selector.slice(1);
         return false;
       },
       dispatchEvent(event) {
@@ -1619,6 +2184,17 @@ function findNodeById(root, id) {
   if (root.id === id || root.getAttribute?.("id") === id) return root;
   for (const child of root.children ?? []) {
     const match = findNodeById(child, id);
+    if (match) return match;
+  }
+  return null;
+}
+
+function findNodeByClass(root, className) {
+  if (!root) return null;
+  const classes = String(root.className || root.getAttribute?.("class") || "").split(/\s+/).filter(Boolean);
+  if (classes.includes(className)) return root;
+  for (const child of root.children ?? []) {
+    const match = findNodeByClass(child, className);
     if (match) return match;
   }
   return null;
