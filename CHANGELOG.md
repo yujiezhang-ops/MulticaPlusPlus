@@ -102,6 +102,9 @@ once public releases are cut.
   subscription lanes into an attention-first workbench with compact metrics,
   type/status filters, local search, a single subscription list, and a selected
   Issue detail panel for secondary and dangerous actions.
+- Removed visible pause/resume controls from the Records subscription workbench
+  so narrow external-browser layouts keep only the current high-value issue
+  actions: view, hide, local remove, and token-gated close.
 - Extended Plan issue preview to support `planSet` inputs with one issue
   candidate per parallel sub-plan.
 - Split the GUI `Permissions` page from the `Control` page so Goal/Plan and

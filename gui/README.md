@@ -157,7 +157,7 @@ Codex Agent` preset 还提供 `Create Image2 Codex Agent`，通过本地 GUI ser
 - `记录` 页中的 `Issue 执行跟踪` 会读取本地订阅表，分组展示 `Assist Goal`、
   `Assist Plan` 和 `Business Issues`，并可按类型、状态和本地搜索过滤。前端只维护
   一个 60 秒聚合轮询 loop，不为每个 issue 单独建连接；同步最多读取 30 个活跃
-  订阅。列表行只保留查看和暂停/恢复；暂时隐去、本地移除和关闭真实 Issue 放在
+  订阅。列表行只保留查看；暂时隐去、本地移除和关闭真实 Issue 放在
   右侧详情面板。Plan 页不会堆叠订阅管理卡片，只提供进入 `记录` 页的轻量入口。
 - Plan 当前步骤高亮。
 - 权限模板、TTL 和审批开关改变本地预览。
@@ -288,7 +288,7 @@ Image2 流程会：
   同步只调用 `multica issue list --output json`、`multica issue runs <issueId>
   --output json` 和 `multica issue comment list <issueId> --output json`，不会修改
   Multica issue。
-- 订阅行的 `暂停/恢复订阅`、`暂时隐去`、`本地移除` 都只改变 Multica++ 本地状态。
+- 订阅详情中的 `暂时隐去`、`本地移除` 都只改变 Multica++ 本地状态。
   `关闭真实 Issue` 是真实 Multica 写入，必须输入 `CLOSE-MULTICA-SUBSCRIBED-ISSUE`，
   并通过本地 GUI server 执行 `multica issue status <id> cancelled --output json`。
 - Agent 辅助 prompt 和本地 Issue preview 会使用当前请求语言；中文 UI 下默认生成

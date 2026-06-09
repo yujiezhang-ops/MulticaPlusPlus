@@ -1345,9 +1345,10 @@ test("GUI records workflow snapshots and manages subscribed issue rows", async (
   assert.ok(document.querySelector(".subscription-table-row"), "issue subscriptions should render compact rows");
   assert.ok(document.querySelector(".subscription-detail-panel"), "issue subscriptions should render selected detail");
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("Issue 执行跟踪"));
-  assert.ok(document.querySelector("#records-list").textContentDeep().includes("暂停"));
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("本地移除"));
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("关闭真实 Issue"));
+  assert.equal(document.querySelector("#records-list").textContentDeep().includes("暂停订阅"), false);
+  assert.equal(Boolean(document.querySelector("[data-action='pause-subscription']")), false);
   assert.equal(Boolean(document.querySelector(".subscription-lane-board")), false);
 
   document.querySelector("#subscription-search-input").value = "SPA-12";
@@ -1375,11 +1376,6 @@ test("GUI records workflow snapshots and manages subscribed issue rows", async (
   restore.dispatchEvent({ type: "click", target: restore });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.ok(document.textContent().includes("恢复历史目标"));
-
-  document.querySelector("[data-action='pause-subscription']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='pause-subscription']") });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(fetchCalls.some((call) => call.url === "/api/issue-subscriptions/sub-business/pause"), true);
-  assert.ok(document.textContent().includes("paused") || document.textContent().includes("暂停"));
 
   document.querySelector("[data-action='close-subscription']").dispatchEvent({ type: "click", target: document.querySelector("[data-action='close-subscription']") });
   await new Promise((resolve) => setTimeout(resolve, 0));

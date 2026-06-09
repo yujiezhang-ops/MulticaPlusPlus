@@ -1589,7 +1589,7 @@
     const headerCopy = el("div", "");
     headerCopy.appendChild(el("span", "section-label", "Records dashboard"));
     headerCopy.appendChild(el("h3", "", "记录与 Issue 订阅"));
-    headerCopy.appendChild(el("p", "panel-note", "在这里恢复历史流程、查看 Assist/Business Issue 订阅，并处理暂停、隐去、本地移除或 token-gated 关闭。删除本地记录不会修改 Multica。"));
+    headerCopy.appendChild(el("p", "panel-note", "在这里恢复历史流程、查看 Assist/Business Issue 订阅，并处理隐去、本地移除或 token-gated 关闭。删除本地记录不会修改 Multica。"));
     const newFlow = el("button", "primary-button");
     newFlow.type = "button";
     newFlow.setAttribute("data-action", "new-workflow");
@@ -2219,14 +2219,7 @@
       open.setAttribute("data-issue-identifier", subscription.issueIdentifier || "");
       open.appendChild(makeIcon("arrow"));
       open.appendChild(el("span", "", "查看"));
-      const pauseResume = el("button", "outline-button compact-button");
-      pauseResume.type = "button";
-      pauseResume.setAttribute("data-action", subscription.state === "paused" ? "resume-subscription" : "pause-subscription");
-      pauseResume.setAttribute("data-subscription-id", subscription.id);
-      pauseResume.appendChild(makeIcon(subscription.state === "paused" ? "play" : "pause"));
-      pauseResume.appendChild(el("span", "", subscription.state === "paused" ? "恢复" : "暂停"));
       actions.appendChild(open);
-      actions.appendChild(pauseResume);
       row.appendChild(actions);
       list.appendChild(row);
     });
@@ -2272,12 +2265,6 @@
     open.setAttribute("data-issue-identifier", subscription.issueIdentifier || "");
     open.appendChild(makeIcon("arrow"));
     open.appendChild(el("span", "", "打开 Issue"));
-    const pauseResume = el("button", "outline-button compact-button");
-    pauseResume.type = "button";
-    pauseResume.setAttribute("data-action", subscription.state === "paused" ? "resume-subscription" : "pause-subscription");
-    pauseResume.setAttribute("data-subscription-id", subscription.id);
-    pauseResume.appendChild(makeIcon(subscription.state === "paused" ? "play" : "pause"));
-    pauseResume.appendChild(el("span", "", subscription.state === "paused" ? "恢复订阅" : "暂停订阅"));
     const hide = el("button", "outline-button compact-button");
     hide.type = "button";
     hide.setAttribute("data-action", "hide-subscription");
@@ -2291,7 +2278,6 @@
     remove.appendChild(makeIcon("x"));
     remove.appendChild(el("span", "", "本地移除订阅"));
     actions.appendChild(open);
-    actions.appendChild(pauseResume);
     actions.appendChild(hide);
     actions.appendChild(remove);
     panel.appendChild(actions);

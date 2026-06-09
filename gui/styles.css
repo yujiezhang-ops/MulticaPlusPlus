@@ -1604,10 +1604,10 @@ button:disabled {
 }
 
 .subscription-table-row {
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  min-height: 82px;
-  padding: 10px;
+  grid-template-columns: minmax(0, 1fr) 84px;
+  align-items: start;
+  min-height: 92px;
+  padding: 10px 10px 10px 12px;
 }
 
 .subscription-table-row.is-selected {
@@ -1621,6 +1621,7 @@ button:disabled {
   display: grid;
   gap: 3px;
   min-width: 0;
+  max-width: 100%;
   padding: 0;
   border: 0;
   color: inherit;
@@ -1643,9 +1644,13 @@ button:disabled {
 
 .subscription-title,
 .subscription-comment {
+  display: block;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .subscription-title {
@@ -1656,12 +1661,11 @@ button:disabled {
 }
 
 .subscription-comment {
-  display: -webkit-box;
+  display: block;
   overflow: hidden;
   font-size: 12px;
   line-height: 1.35;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
 }
 
 .subscription-row-badges,
@@ -1675,12 +1679,22 @@ button:disabled {
 }
 
 .subscription-row-badges {
-  justify-content: flex-end;
-  max-width: 160px;
+  grid-column: 1 / 2;
+  justify-content: flex-start;
+  max-width: 100%;
 }
 
 .subscription-inline-actions {
+  grid-column: 2 / 3;
+  grid-row: 1 / span 2;
   justify-content: flex-end;
+  align-self: start;
+}
+
+.subscription-inline-actions .compact-button {
+  width: 76px;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .subscription-state-badge {
@@ -1860,11 +1874,13 @@ button:disabled {
 }
 
 .subscription-comment {
-  display: -webkit-box;
+  display: block;
   overflow: hidden;
-  line-height: 1.4;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .subscription-danger-zone {
@@ -1901,24 +1917,22 @@ button:disabled {
   }
 
   .subscription-table-row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) 84px;
   }
 
   .subscription-inline-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
+    grid-column: 2 / 3;
+    justify-content: flex-end;
   }
 }
 
 @container (max-width: 640px) {
   .subscription-overview-grid,
-  .subscription-table-row,
   .subscription-search {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .subscription-row-badges,
-  .subscription-inline-actions {
+  .subscription-row-badges {
     justify-content: flex-start;
     max-width: none;
   }
