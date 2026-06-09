@@ -77,7 +77,35 @@ hero treatment.
 - Mobile and narrow widths only need a reliable single-column fallback with no
   horizontal overflow; they are not the target experience for this refactor.
 
-## 6. Motion & Interaction
+## 6. Control Page Information Load
+
+`Control` should read as a guided execution desk, not a debug transcript. The
+primary journey is always:
+
+1. 输入/澄清 Goal
+2. 锁定 Goal
+3. 生成 Plan
+4. 预览并创建 Issue
+
+Default visible content should answer only the current decision: what is ready,
+what is blocked, and what the next action is. Put long success criteria, Goal
+history, Plan step tables, metadata, CLI commands, full Issue descriptions, and
+Assist run details behind progressive disclosure controls such as `展开目标详情`,
+`查看步骤详情`, `查看写入详情`, or `查看 Assist 详情`.
+
+Key rules:
+
+- Show one next-action banner in the Plan panel. Avoid multiple competing
+  helper paragraphs.
+- Goal summaries show title, status, owner, progress, and at most the first
+  three success criteria by default.
+- Draft clarification questions are visible only while they block locking.
+- Issue preview cards show title, priority/created state, summary, and the main
+  action first. CLI commands and metadata are secondary details.
+- Helper copy can be 13px, but key decisions and button labels should stay
+  14-16px and readable on desktop.
+
+## 7. Motion & Interaction
 
 - Motion is restrained: 160-220ms transitions for border, background, opacity,
   and transform.
@@ -86,7 +114,7 @@ hero treatment.
 - Loading, blocked, pending, and empty states should be inline and recoverable,
   not modal-first.
 
-## 7. Anti-Patterns
+## 8. Anti-Patterns
 
 - No marketing hero, decorative illustration, mascot, emoji, or fake landing
   copy.

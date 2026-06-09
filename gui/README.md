@@ -37,7 +37,8 @@ http://127.0.0.1:8787/
 - 仓库根目录的 `DESIGN.md` 是后续 Stitch 生成或人工重构 GUI 时的设计系统入口。
 - 直接打开静态页面时，浏览器页面只使用本地预览数据。
 - 通过 `npm run gui` 打开时，Image2 按钮会调用本地 API 执行真实 Multica CLI。
-- 首屏为 `控制台`，采用 `目标` + `计划` 两栏工作区。
+- 首屏为 `控制台`，采用 `目标` + `计划` 两栏工作区，并按
+  `输入/澄清 Goal -> 锁定 Goal -> 生成 Plan -> 预览并创建 Issue` 的旅程推进。
 - 左侧提供 `一键配置 Agent` 按钮，以及 `插件预制体` / `团队预制体`
   列表。
 - 点击预制体后可以查看并修改默认 Agent 配置，再预览计划或创建 Agent。
@@ -68,14 +69,17 @@ http://127.0.0.1:8787/
 
 ## 控制台页面
 
-`控制台` 首屏包含两栏：
+`控制台` 首屏包含两栏，并默认只展示当前要判断和执行的内容：
 
-- `目标`：展示当前目标、负责人或触发来源、状态、完成度、最近更新，以及
-  恢复 / 继续入口。
-- `计划`：明确展示 `Goal -> Plan -> Issue` 路径，展示有序步骤、
-  pending/running/done/blocked 状态、依赖关系、当前执行项高亮和阻塞原因。
-  该页只保留执行链路、Plan/PlanSet 展示、业务 Issue preview 和创建入口；
-  订阅管理和历史快照通过页内入口跳转到 `记录` 页集中处理。
+- `目标`：输入和澄清需求，展示紧凑目标摘要、状态、负责人、进度和最多前三条
+  成功标准。完整成功标准、最近更新和目标历史放在 `展开目标详情` 中；只有
+  draft Goal 阻塞锁定时才展开待澄清问题和补充输入区。
+- `计划`：顶部用大号旅程条和 `当前可执行动作` 提示展示下一步，例如锁定 Goal、
+  生成 Plan、预览业务 Issue 或输入确认 token 创建 Issue。Plan/PlanSet 展示、
+  业务 Issue preview 和创建入口保留在该页；步骤表、状态图例、Assist 运行详情、
+  CLI 命令、metadata 和完整 Issue 描述默认折叠到详情入口。
+- 订阅管理和历史快照通过页内入口跳转到 `记录` 页集中处理，不再堆叠在
+  `控制台` 页面。
 
 ## 权限页面
 
@@ -142,9 +146,10 @@ Codex Agent` preset 还提供 `Create Image2 Codex Agent`，通过本地 GUI ser
 - `生成 Plan 并预览 Issue` 会先生成 Plan，再展示 `Plan 到 Issue 预览`；
   若已有 Agent PlanSet，则直接按每个 subPlan 预览一个业务 Issue 候选，不会重新
   生成 Plan。
-- `Plan 到 Issue 预览` 展示 title、priority、description 摘要、metadata 和将执行
-  的 `multica issue create` 操作。每张候选卡片都有 `创建此 Issue` 和 `复制命令`；
-  总确认区保留 `创建全部 Multica Issue`。只有输入
+- `Plan 到 Issue 预览` 默认展示 title、priority 或 created 状态、description 摘要
+  和主要操作。metadata、完整 description、`multica issue create` 命令和
+  `复制命令` 放在 `查看写入详情` 中。每张候选卡片都有 `创建此 Issue`；总确认区
+  保留 `创建全部 Multica Issue`。只有输入
   `APPLY-MULTICA-ISSUE-SPLIT` 后，GUI server 才会调用 `/api/plan/apply-issues`
   创建真实业务 Issue 并写 metadata。已创建的候选会显示 `打开 Issue` 和
   `复制 Issue ID`，再次批量创建时会跳过已创建候选。

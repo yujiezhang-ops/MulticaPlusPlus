@@ -814,82 +814,16 @@
     controls.appendChild(clarify);
     controls.appendChild(lock);
     builder.appendChild(controls);
-    builder.appendChild(el("p", "goal-feedback", state.goalPlanFeedback));
+    if (state.goalPlanFeedback) {
+      builder.appendChild(el("p", "goal-feedback primary-feedback", compactText(state.goalPlanFeedback, 120)));
+    }
     if (state.normalizedGoal?.status === "draft") {
       builder.appendChild(renderGoalClarificationFollowup());
     }
     target.appendChild(builder);
 
-    const objective = el("section", "goal-section");
-    objective.appendChild(el("span", "section-label", "当前目标"));
-    objective.appendChild(el("h2", "goal-title", state.lockedGoal?.objective || state.normalizedGoal?.objective || mockData.goal.objective));
-    if (state.normalizedGoal?.successCriteria?.length) {
-      objective.appendChild(configList("目标详情 · 成功标准", state.normalizedGoal.successCriteria));
-    }
-    if (state.normalizedGoal?.clarificationQuestions?.length) {
-      objective.appendChild(configList("目标详情 · 待澄清问题", state.normalizedGoal.clarificationQuestions));
-    }
-    target.appendChild(objective);
-
-    const meta = el("div", "goal-meta-row");
-    const owner = el("div", "goal-meta");
-    owner.appendChild(el("span", "section-label", "负责人"));
-    const ownerValue = el("span", "person-value");
-    ownerValue.appendChild(makeIcon("user"));
-    ownerValue.appendChild(el("span", "", state.lockedGoal?.owner || state.normalizedGoal?.owner || mockData.goal.owner));
-    owner.appendChild(ownerValue);
-
-    const status = el("div", "goal-meta");
-    status.appendChild(el("span", "section-label", "状态"));
-    const statusValue = el("span", "status-chip status-running");
-    statusValue.appendChild(el("span", "status-dot"));
-    statusValue.appendChild(el("span", "", goalStatusLabel(state.lockedGoal?.status || state.normalizedGoal?.status || mockData.goal.status)));
-    status.appendChild(statusValue);
-    meta.appendChild(owner);
-    meta.appendChild(status);
-    target.appendChild(meta);
-
-    const progressSection = el("section", "goal-section progress-section");
-    const progressHeader = el("div", "progress-header");
-    progressHeader.appendChild(el("span", "", "进度"));
-    progressHeader.appendChild(el("span", "", `${mockData.goal.completedSteps} / ${mockData.goal.totalSteps} 步`));
-    progressHeader.appendChild(el("span", "", `${mockData.goal.progress}%`));
-    progressSection.appendChild(progressHeader);
-    const progress = el("div", "progress-track");
-    const fill = el("span", "progress-fill");
-    fill.style.width = `${mockData.goal.progress}%`;
-    progress.appendChild(fill);
-    progressSection.appendChild(progress);
-    target.appendChild(progressSection);
-
-    const resume = el("section", "resume-card");
-    const resumeCopy = el("div", "");
-    resumeCopy.appendChild(el("h3", "", "恢复 / 继续"));
-    resumeCopy.appendChild(el("p", "", `最后保存 ${mockData.goal.lastSaved}`));
-    const resumeButton = el("button", "outline-button resume-button");
-    resumeButton.type = "button";
-    resumeButton.setAttribute("data-action", "resume-goal");
-    resumeButton.appendChild(makeIcon("play"));
-    resumeButton.appendChild(el("span", "", "继续"));
-    resume.appendChild(resumeCopy);
-    resume.appendChild(resumeButton);
-    target.appendChild(resume);
-
-    const update = el("section", "goal-section latest-update");
-    const updateHeader = el("div", "split-header");
-    updateHeader.appendChild(el("h3", "", "最新目标更新"));
-    updateHeader.appendChild(el("span", "", mockData.goal.latestUpdateTime));
-    update.appendChild(updateHeader);
-    update.appendChild(el("p", "", state.normalizedGoal?.title || mockData.goal.latestUpdate));
-    target.appendChild(update);
-
-    const history = el("button", "full-row-button");
-    history.type = "button";
-    history.setAttribute("data-action", "view-goal-history");
-    history.appendChild(makeIcon("clock"));
-    history.appendChild(el("span", "", "查看目标历史"));
-    history.appendChild(el("span", "row-arrow"));
-    target.appendChild(history);
+    target.appendChild(renderGoalSummaryCard());
+    target.appendChild(renderGoalDetailDisclosure());
   }
 
   function renderGoalPlanPath() {
@@ -920,6 +854,83 @@
     });
     wrapper.appendChild(path);
     return wrapper;
+  }
+
+  function renderGoalSummaryCard() {
+    const card = el("section", "goal-summary-card");
+    const goal = state.lockedGoal || state.normalizedGoal || mockData.goal;
+    const statusText = goalStatusLabel(state.lockedGoal?.status || state.normalizedGoal?.status || mockData.goal.status);
+    const ownerText = state.lockedGoal?.owner || state.normalizedGoal?.owner || mockData.goal.owner;
+    const objective = state.lockedGoal?.objective || state.normalizedGoal?.objective || mockData.goal.objective;
+    const criteria = state.normalizedGoal?.successCriteria || state.lockedGoal?.successCriteria || [];
+
+    const header = el("div", "goal-summary-header");
+    header.appendChild(el("span", "section-label", "当前目标"));
+    const statusValue = el("span", "status-chip status-running");
+    statusValue.appendChild(el("span", "status-dot"));
+    statusValue.appendChild(el("span", "", statusText));
+    header.appendChild(statusValue);
+    card.appendChild(header);
+    card.appendChild(el("h2", "goal-title", objective));
+
+    const facts = el("div", "goal-summary-facts");
+    [
+      ["负责人", ownerText],
+      ["进度", `${mockData.goal.completedSteps}/${mockData.goal.totalSteps} 步 · ${mockData.goal.progress}%`],
+      ["保存", mockData.goal.lastSaved],
+    ].forEach(([label, value]) => {
+      const item = el("div", "goal-summary-fact");
+      item.appendChild(el("span", "", label));
+      item.appendChild(el("strong", "", value));
+      facts.appendChild(item);
+    });
+    card.appendChild(facts);
+
+    const progress = el("div", "progress-track goal-summary-progress");
+    const fill = el("span", "progress-fill");
+    fill.style.width = `${mockData.goal.progress}%`;
+    progress.appendChild(fill);
+    card.appendChild(progress);
+
+    if (criteria.length) {
+      const preview = el("section", "goal-criteria-preview");
+      preview.appendChild(el("span", "section-label", "成功标准"));
+      const list = el("ul", "");
+      criteria.slice(0, 3).forEach((item) => list.appendChild(el("li", "", item)));
+      preview.appendChild(list);
+      if (criteria.length > 3) {
+        preview.appendChild(el("p", "setting-help", `还有 ${criteria.length - 3} 条标准在“展开目标详情”中。`));
+      }
+      card.appendChild(preview);
+    }
+
+    return card;
+  }
+
+  function renderGoalDetailDisclosure() {
+    return renderCollapsibleDetails("展开目标详情", (content) => {
+      const criteria = state.normalizedGoal?.successCriteria || state.lockedGoal?.successCriteria || [];
+      if (criteria.length) {
+        content.appendChild(configList("完整成功标准", criteria));
+      }
+      if (state.normalizedGoal?.status === "draft" && state.normalizedGoal?.clarificationQuestions?.length) {
+        content.appendChild(configList("待澄清问题", state.normalizedGoal.clarificationQuestions));
+      }
+      const update = el("section", "goal-detail-update");
+      const updateHeader = el("div", "split-header");
+      updateHeader.appendChild(el("h3", "", "最近更新"));
+      updateHeader.appendChild(el("span", "config-status", mockData.goal.latestUpdateTime));
+      update.appendChild(updateHeader);
+      update.appendChild(el("p", "", state.normalizedGoal?.title || mockData.goal.latestUpdate));
+      content.appendChild(update);
+      const history = el("button", "full-row-button compact-history-button");
+      history.type = "button";
+      history.setAttribute("data-action", "view-goal-history");
+      history.appendChild(makeIcon("clock"));
+      history.appendChild(el("span", "", "查看目标历史"));
+      history.appendChild(el("span", "row-arrow"));
+      content.appendChild(history);
+    }, "goal-detail-disclosure");
   }
 
   function renderGoalClarificationFollowup() {
@@ -957,38 +968,23 @@
   function renderIssueSplitPreview() {
     const previewCard = el("section", "issue-split-card");
     previewCard.appendChild(el("h3", "", "Plan 到 Issue 预览"));
-    previewCard.appendChild(el("p", "", state.issueSplit.summary));
+    previewCard.appendChild(el("p", "issue-preview-summary", compactText(state.issueSplit.summary, 96)));
     if (state.issueSplit.issues?.length) {
       const list = el("div", "issue-preview-list");
       state.issueSplit.issues.forEach((issue, index) => {
-        const item = el("article", "issue-preview-item");
+        const item = el("article", "issue-preview-item compact-issue-card");
         const itemHeader = el("div", "split-header");
         itemHeader.appendChild(el("h4", "", issue.title));
-        itemHeader.appendChild(el("span", "config-status", issue.priority || "medium"));
+        const createdIssue = createdIssueForPreview(issue.id);
+        itemHeader.appendChild(el("span", "config-status", createdIssue ? `已创建 ${createdIssue.identifier || createdIssue.id}` : (issue.priority || "medium")));
         item.appendChild(itemHeader);
         const description = compactText(issue.description || "", 150);
         if (description) {
           item.appendChild(el("p", "issue-description-preview", description));
         }
         const operation = state.issueSplit.operations?.[index];
-        if (issue.metadata && Object.keys(issue.metadata).length) {
-          const metadata = el("dl", "config-definition issue-metadata");
-          Object.entries(issue.metadata).forEach(([key, value]) => {
-            metadata.appendChild(el("dt", "", key));
-            metadata.appendChild(el("dd", "", String(value)));
-          });
-          item.appendChild(metadata);
-        }
-        if (operation?.displayCommand) {
-          const command = el("div", "cli-command-row issue-operation");
-          command.appendChild(el("span", "cli-command-label", "将执行"));
-          command.appendChild(el("code", "", operation.displayCommand));
-          item.appendChild(command);
-        }
         const issueActions = el("div", "issue-card-actions");
-        const createdIssue = createdIssueForPreview(issue.id);
         if (createdIssue) {
-          issueActions.appendChild(el("span", "config-status", `已创建 ${createdIssue.identifier || createdIssue.id}`));
           const open = el("button", "outline-button compact-button");
           open.type = "button";
           open.setAttribute("data-action", "open-issue");
@@ -1014,16 +1010,8 @@
           createOne.appendChild(el("span", "", "创建此 Issue"));
           issueActions.appendChild(createOne);
         }
-        if (operation?.displayCommand) {
-          const copy = el("button", "outline-button compact-button");
-          copy.type = "button";
-          copy.setAttribute("data-action", "copy-command");
-          copy.setAttribute("data-copy-value", operation.displayCommand);
-          copy.appendChild(makeIcon("copy"));
-          copy.appendChild(el("span", "", "复制命令"));
-          issueActions.appendChild(copy);
-        }
         item.appendChild(issueActions);
+        item.appendChild(renderIssueWriteDetails(issue, operation));
         list.appendChild(item);
       });
       previewCard.appendChild(list);
@@ -1037,7 +1025,7 @@
   function renderIssueApplyControls() {
     const section = el("section", "issue-apply-card");
     section.appendChild(el("h4", "", "确认创建业务 Issue"));
-    section.appendChild(el("p", "setting-help", "预览阶段不会写入 Multica。只有输入确认 token 后，才会创建真实业务 Issue；Agent assist issue 不算业务 Issue。"));
+    section.appendChild(el("p", "setting-help single-line-help", "输入 token 后才会创建真实业务 Issue；Assist Issue 不算业务 Issue。"));
     if (state.issueSplit.confirmationRequired) {
       const token = state.issueSplit.confirmationToken || "APPLY-MULTICA-ISSUE-SPLIT";
       const input = el("input", "confirm-input");
@@ -1055,7 +1043,7 @@
       create.appendChild(el("span", "", state.issueApplyStatus === "creating" ? "创建中" : "创建全部 Multica Issue"));
       actionRow.appendChild(create);
       section.appendChild(actionRow);
-      section.appendChild(el("p", "setting-help", `必须输入 ${token}`));
+      section.appendChild(el("p", "setting-help single-line-help", `必须输入 ${token}`));
     }
     if (state.issueApplyError) {
       section.appendChild(el("p", "goal-feedback error-text", state.issueApplyError));
@@ -1068,6 +1056,51 @@
       section.appendChild(created);
     }
     return section;
+  }
+
+  function renderIssueWriteDetails(issue, operation) {
+    return renderCollapsibleDetails("查看写入详情", (content) => {
+      const fullDescription = issue.description || "";
+      if (fullDescription) {
+        const description = el("section", "issue-write-section");
+        description.appendChild(el("h5", "", "完整描述"));
+        description.appendChild(el("p", "", fullDescription));
+        content.appendChild(description);
+      }
+      if (issue.metadata && Object.keys(issue.metadata).length) {
+        const metadata = el("dl", "config-definition issue-metadata");
+        Object.entries(issue.metadata).forEach(([key, value]) => {
+          metadata.appendChild(el("dt", "", key));
+          metadata.appendChild(el("dd", "", String(value)));
+        });
+        content.appendChild(metadata);
+      }
+      if (operation?.displayCommand) {
+        const command = el("div", "cli-command-row issue-operation");
+        command.appendChild(el("span", "cli-command-label", "将执行"));
+        command.appendChild(el("code", "", operation.displayCommand));
+        content.appendChild(command);
+        const copy = el("button", "outline-button compact-button");
+        copy.type = "button";
+        copy.setAttribute("data-action", "copy-command");
+        copy.setAttribute("data-copy-value", operation.displayCommand);
+        copy.appendChild(makeIcon("copy"));
+        copy.appendChild(el("span", "", "复制命令"));
+        content.appendChild(copy);
+      }
+    }, "issue-write-details");
+  }
+
+  function renderCollapsibleDetails(summaryText, fillContent, className = "") {
+    const details = el("details", `detail-disclosure ${className}`.trim());
+    const summary = el("summary", "");
+    summary.appendChild(el("span", "", summaryText));
+    summary.appendChild(el("span", "row-arrow"));
+    details.appendChild(summary);
+    const content = el("div", "detail-disclosure-body");
+    fillContent(content);
+    details.appendChild(content);
+    return details;
   }
 
   function createdIssueForPreview(issuePreviewId) {
@@ -1101,28 +1134,97 @@
     };
   }
 
-  function renderAssistRunSummary(assist) {
-    const section = el("section", "assist-run-summary");
-    const issue = assist?.issue;
-    const run = assist?.run;
-    if (!issue && !run) {
-      section.appendChild(el("p", "setting-help", "Agent 辅助会创建真实 Multica assist issue/task；业务 Issue 仍只生成预览候选。"));
-      return section;
-    }
-    const rows = [
-      ["Assist Issue", issue?.identifier || issue?.id],
-      ["Issue 状态", issue?.status],
-      ["Run", run?.id],
-      ["Run 状态", run?.status],
-    ].filter(([, value]) => value !== undefined && value !== null && value !== "");
-    const definition = el("dl", "config-definition");
-    rows.forEach(([label, value]) => {
-      definition.appendChild(el("dt", "", label));
-      definition.appendChild(el("dd", "", String(value)));
+  function renderAssistStatusDisclosure(assist) {
+    const issue = assist?.issue || assist;
+    const run = assist?.run || {};
+    const pill = el("section", "assist-status-pill");
+    const label = issue?.identifier || issue?.issueIdentifier || issue?.id || issue?.issueId || "Assist Issue";
+    pill.appendChild(el("span", "section-label", "Assist Issue"));
+    pill.appendChild(el("strong", "", `${label}${run?.status ? ` · ${run.status}` : ""}`));
+    pill.appendChild(renderCollapsibleDetails("查看 Assist 详情", (content) => {
+      const rows = [
+        ["类型", assist?.kind === "goal" ? "Goal 澄清" : "Plan 拆分"],
+        ["Issue", label],
+        ["Agent", assist?.agent?.name || assist?.agent?.id],
+        ["Request", assist?.assistRequestId],
+        ["Run", run?.id],
+        ["Run 状态", run?.status],
+      ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+      const definition = el("dl", "config-definition");
+      rows.forEach(([key, value]) => {
+        definition.appendChild(el("dt", "", key));
+        definition.appendChild(el("dd", "", String(value)));
+      });
+      content.appendChild(definition);
+      content.appendChild(el("p", "setting-help", "页面刷新后会继续订阅同一个 Assist Issue 的评论/运行结果，不会重新创建 assist task。"));
+    }, "assist-detail-disclosure"));
+    return pill;
+  }
+
+  function renderJourneyHeader() {
+    const section = el("section", "journey-header");
+    const current = currentJourneyStep();
+    const top = el("div", "journey-topline");
+    top.appendChild(el("span", "section-label", "当前旅程"));
+    top.appendChild(el("strong", "", current.action));
+    section.appendChild(top);
+    const steps = el("ol", "journey-steps");
+    [
+      ["1", "输入/澄清 Goal", Boolean(state.normalizedGoal || state.lockedGoal), current.step === 1],
+      ["2", "锁定 Goal", Boolean(state.lockedGoal), current.step === 2],
+      ["3", "生成 Plan", Boolean(state.generatedPlan || state.planSet), current.step === 3],
+      ["4", "预览并创建 Issue", Boolean(state.issueApplyResult?.createdIssues?.length), current.step === 4],
+    ].forEach(([number, label, complete, active]) => {
+      const item = el("li", `${complete ? "is-complete" : ""} ${active ? "is-active" : ""}`.trim());
+      item.appendChild(el("span", "journey-step-number", number));
+      item.appendChild(el("span", "journey-step-label", label));
+      steps.appendChild(item);
     });
-    section.appendChild(definition);
-    section.appendChild(el("p", "setting-help", "上方 assist issue/task 是点击即运行产生的真实 Multica 调用记录；下方业务 Issue 仍需预览和确认后才会创建。"));
+    section.appendChild(steps);
     return section;
+  }
+
+  function currentJourneyStep() {
+    if (!state.normalizedGoal && !state.lockedGoal) {
+      return { step: 1, action: "下一步：澄清目标" };
+    }
+    if (!state.lockedGoal) {
+      return state.normalizedGoal?.status === "draft"
+        ? { step: 1, action: "下一步：补充澄清信息" }
+        : { step: 2, action: "下一步：锁定 Goal" };
+    }
+    if (!state.generatedPlan && !state.planSet) {
+      return { step: 3, action: "下一步：生成 Plan" };
+    }
+    if (!state.issueSplit) {
+      return { step: 4, action: "下一步：预览业务 Issue" };
+    }
+    if (!state.issueApplyResult?.createdIssues?.length) {
+      return { step: 4, action: "下一步：输入确认 token 创建 Issue" };
+    }
+    return { step: 4, action: `已创建 ${state.issueApplyResult.createdIssues.length} 个业务 Issue` };
+  }
+
+  function renderActionBanner() {
+    const current = currentJourneyStep();
+    const banner = el("section", "action-banner");
+    const copy = el("div", "action-banner-copy");
+    copy.appendChild(el("span", "section-label", "当前可执行动作"));
+    copy.appendChild(el("h3", "", current.action));
+    const detail = state.issueApplyResult?.createdIssues?.length
+      ? "业务 Issue 已创建。后续跟踪与订阅管理在记录页完成。"
+      : state.issueSplit
+      ? "确认 token 后才会创建真实业务 Issue；Assist Issue 不算业务 Issue。"
+      : state.generatedPlan || state.planSet
+      ? "Plan 已就绪，现在可以预览业务 Issue 候选。"
+      : state.lockedGoal
+      ? "Goal 已锁定，可以生成单 Plan 或由 Agent 拆分为多个 Plan。"
+      : "先完成 Goal 澄清和锁定，再进入 Plan 与 Issue。";
+    copy.appendChild(el("p", "", detail));
+    banner.appendChild(copy);
+    const status = el("span", "config-status action-status", state.goalPlanStatus || "草稿");
+    banner.appendChild(status);
+    return banner;
   }
 
   function renderPlan() {
@@ -1131,10 +1233,8 @@
     clear(target);
 
     const planBuilder = el("section", "plan-builder");
-    const header = el("div", "split-header");
-    header.appendChild(el("h3", "", "目标到计划"));
-    header.appendChild(el("span", "config-status", state.planSet ? "并行 Plan" : (state.generatedPlan?.issueSplitRecommendation || "预览")));
-    planBuilder.appendChild(header);
+    planBuilder.appendChild(renderJourneyHeader());
+    planBuilder.appendChild(renderActionBanner());
     planBuilder.appendChild(renderGoalPlanPath());
     const controls = el("div", "goal-action-row");
     const complexity = el("select", "");
@@ -1166,24 +1266,13 @@
     controls.appendChild(preview);
     controls.appendChild(splitLlm);
     planBuilder.appendChild(controls);
-    planBuilder.appendChild(el("p", "goal-feedback", state.planSet ? `${state.planSet.plans.length} 个并行 Plan 已生成，Agent：${state.planSet.assist?.agent?.name || state.planSet.provider?.model || state.planSet.provider?.kind || "Multica Agent"}；下一步预览业务 Issue，确认 token 后才会创建真实 Multica Issue。` : (state.issueSplit?.summary || "Locked Goal 会先生成 Plan，再由 Plan 预览是否需要创建 Multica issue。")));
+    if (state.planSet) {
+      planBuilder.appendChild(el("p", "goal-feedback primary-feedback", `${state.planSet.plans.length} 个并行 Plan 已生成，下一步预览业务 Issue。`));
+    } else if (state.issueSplit?.summary) {
+      planBuilder.appendChild(el("p", "goal-feedback primary-feedback", compactText(state.issueSplit.summary, 100)));
+    }
     if (state.pendingAssist?.issueId) {
-      const pendingCard = el("section", "assist-run-summary");
-      pendingCard.appendChild(el("h3", "", "Assist Issue 收件箱订阅"));
-      const rows = [
-        ["类型", state.pendingAssist.kind === "goal" ? "Goal 澄清" : "Plan 拆分"],
-        ["Issue", state.pendingAssist.issueIdentifier || state.pendingAssist.issueId],
-        ["Agent", state.pendingAssist.agent?.name || state.pendingAssist.agent?.id],
-        ["Request", state.pendingAssist.assistRequestId],
-      ].filter(([, value]) => value !== undefined && value !== null && value !== "");
-      const definition = el("dl", "config-definition");
-      rows.forEach(([label, value]) => {
-        definition.appendChild(el("dt", "", label));
-        definition.appendChild(el("dd", "", String(value)));
-      });
-      pendingCard.appendChild(definition);
-      pendingCard.appendChild(el("p", "setting-help", "页面刷新后会继续订阅同一个 Assist Issue 的评论/运行结果，不会重新创建 assist task。"));
-      planBuilder.appendChild(pendingCard);
+      planBuilder.appendChild(renderAssistStatusDisclosure(state.pendingAssist));
     }
     if (state.planSet?.plans?.length) {
       const planSetCard = el("section", "plan-set-card");
@@ -1191,7 +1280,9 @@
       planSetHeader.appendChild(el("h3", "", "并行 Plan"));
       planSetHeader.appendChild(el("span", "config-status", state.planSet.assist?.agent?.name || state.planSet.provider?.model || state.planSet.provider?.kind || "Agent"));
       planSetCard.appendChild(planSetHeader);
-      planSetCard.appendChild(renderAssistRunSummary(state.planSet.assist));
+      if (state.planSet.assist) {
+        planSetCard.appendChild(renderAssistStatusDisclosure(state.planSet.assist));
+      }
       state.planSet.plans.forEach((plan) => {
         const card = el("article", "sub-plan-card");
         const cardHeader = el("div", "split-header");
@@ -1236,90 +1327,102 @@
     planBuilder.appendChild(renderRecordsManagementNotice());
     target.appendChild(planBuilder);
 
-    const toolbar = el("div", "plan-toolbar");
-    [
-      ["all", "全部"],
-      ["running", "进行中"],
-      ["pending", "待处理"],
-      ["done", "已完成"],
-      ["blocked", "阻塞"]
-    ].forEach(([status, label]) => {
-      const count = status === "all"
-        ? mockData.planItems.length
-        : mockData.planItems.filter((item) => item.status === status).length;
-      const button = el("button", "plan-filter", `${label} ${count}`);
-      button.type = "button";
-      button.setAttribute("data-plan-filter", status);
-      button.setAttribute("aria-pressed", state.planFilter === status ? "true" : "false");
-      toolbar.appendChild(button);
-    });
-    target.appendChild(toolbar);
+    target.appendChild(renderPlanStepDetails());
+  }
 
-    const table = el("table", "plan-table");
-    const thead = el("thead");
-    const headerRow = el("tr");
-    ["#", "任务", "状态", "依赖"].forEach((label) => headerRow.appendChild(el("th", "", label)));
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
+  function renderPlanStepDetails() {
+    return renderCollapsibleDetails("查看步骤详情", (content) => {
+      const sourceItems = currentPlanStepItems();
+      const toolbar = el("div", "plan-toolbar");
+      [
+        ["all", "全部"],
+        ["running", "进行中"],
+        ["pending", "待处理"],
+        ["done", "已完成"],
+        ["blocked", "阻塞"]
+      ].forEach(([status, label]) => {
+        const count = status === "all"
+          ? sourceItems.length
+          : sourceItems.filter((item) => item.status === status).length;
+        const button = el("button", "plan-filter", `${label} ${count}`);
+        button.type = "button";
+        button.setAttribute("data-plan-filter", status);
+        button.setAttribute("aria-pressed", state.planFilter === status ? "true" : "false");
+        toolbar.appendChild(button);
+      });
+      content.appendChild(toolbar);
 
-    const tbody = el("tbody");
-    const sourceItems = state.planSet?.plans?.length
-      ? state.planSet.plans.map((plan) => ({
+      const table = el("table", "plan-table");
+      const thead = el("thead");
+      const headerRow = el("tr");
+      ["#", "任务", "状态", "依赖"].forEach((label) => headerRow.appendChild(el("th", "", label)));
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = el("tbody");
+      const items = state.planFilter === "all"
+        ? sourceItems
+        : sourceItems.filter((item) => item.status === state.planFilter);
+      items.forEach((item) => {
+        const row = el("tr", `plan-row status-${item.status}`);
+        row.setAttribute("data-plan-status", item.status);
+        row.appendChild(el("td", "plan-number", String(item.number)));
+        row.appendChild(el("td", "plan-task", item.task));
+        const statusCell = el("td", "plan-status-cell");
+        const pill = el("span", `status-inline status-${item.status}`);
+        pill.appendChild(el("span", "status-ring"));
+        pill.appendChild(el("span", "", statusLabel(item.status)));
+        statusCell.appendChild(pill);
+        row.appendChild(statusCell);
+        row.appendChild(el("td", "plan-deps", item.dependencies));
+        tbody.appendChild(row);
+      });
+      if (items.length === 0) {
+        const row = el("tr", "plan-row");
+        const cell = el("td", "plan-empty", state.generatedPlan || state.planSet ? "没有符合当前筛选的计划项。" : "Plan 待生成。请先锁定 Goal，再生成 Plan。");
+        cell.colSpan = 4;
+        row.appendChild(cell);
+        tbody.appendChild(row);
+      }
+      table.appendChild(tbody);
+      content.appendChild(table);
+
+      const legend = el("div", "plan-legend");
+      ["done", "running", "pending", "blocked"].forEach((status) => {
+        const item = el("span", `legend-item status-${status}`);
+        item.appendChild(el("span", "status-ring"));
+        item.appendChild(el("span", "", statusLabel(status)));
+        legend.appendChild(item);
+      });
+      content.appendChild(legend);
+
+      const current = sourceItems.find((item) => item.status === "running");
+      const footer = el("div", "plan-current-step");
+      footer.appendChild(el("span", "", "当前步骤"));
+      footer.appendChild(el("strong", "", current ? `${current.number} / ${sourceItems.length}` : "--"));
+      footer.appendChild(el("span", "", current ? current.task : "暂无活跃步骤"));
+      content.appendChild(footer);
+    }, "plan-step-details");
+  }
+
+  function currentPlanStepItems() {
+    if (state.planSet?.plans?.length) {
+      return state.planSet.plans.map((plan) => ({
         number: plan.number,
         task: plan.title,
         status: plan.status,
         dependencies: Array.isArray(plan.dependencies) && plan.dependencies.length ? plan.dependencies.join(", ") : "--"
-      }))
-      : state.generatedPlan?.steps?.length
-      ? state.generatedPlan.steps.map((step) => ({
+      }));
+    }
+    if (state.generatedPlan?.steps?.length) {
+      return state.generatedPlan.steps.map((step) => ({
         number: step.number,
         task: step.title,
         status: step.status,
         dependencies: Array.isArray(step.dependencies) && step.dependencies.length ? step.dependencies.join(", ") : "--"
-      }))
-      : [];
-    const items = state.planFilter === "all"
-      ? sourceItems
-      : sourceItems.filter((item) => item.status === state.planFilter);
-    items.forEach((item) => {
-      const row = el("tr", `plan-row status-${item.status}`);
-      row.setAttribute("data-plan-status", item.status);
-      row.appendChild(el("td", "plan-number", String(item.number)));
-      row.appendChild(el("td", "plan-task", item.task));
-      const statusCell = el("td", "plan-status-cell");
-      const pill = el("span", `status-inline status-${item.status}`);
-      pill.appendChild(el("span", "status-ring"));
-      pill.appendChild(el("span", "", statusLabel(item.status)));
-      statusCell.appendChild(pill);
-      row.appendChild(statusCell);
-      row.appendChild(el("td", "plan-deps", item.dependencies));
-      tbody.appendChild(row);
-    });
-    if (items.length === 0) {
-      const row = el("tr", "plan-row");
-      const cell = el("td", "plan-empty", state.generatedPlan || state.planSet ? "没有符合当前筛选的计划项。" : "Plan 待生成。请先锁定 Goal，再生成 Plan。");
-      cell.colSpan = 4;
-      row.appendChild(cell);
-      tbody.appendChild(row);
+      }));
     }
-    table.appendChild(tbody);
-    target.appendChild(table);
-
-    const legend = el("div", "plan-legend");
-    ["done", "running", "pending", "blocked"].forEach((status) => {
-      const item = el("span", `legend-item status-${status}`);
-      item.appendChild(el("span", "status-ring"));
-      item.appendChild(el("span", "", statusLabel(status)));
-      legend.appendChild(item);
-    });
-    target.appendChild(legend);
-
-    const current = sourceItems.find((item) => item.status === "running");
-    const footer = el("div", "plan-current-step");
-    footer.appendChild(el("span", "", "当前步骤"));
-    footer.appendChild(el("strong", "", current ? `${current.number} / ${sourceItems.length}` : "--"));
-    footer.appendChild(el("span", "", current ? current.task : "暂无活跃步骤"));
-    target.appendChild(footer);
+    return [];
   }
 
   function renderPermissionSummary(template) {

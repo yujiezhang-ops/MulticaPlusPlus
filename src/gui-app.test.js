@@ -441,9 +441,17 @@ test("GUI clarifies a goal, locks it, and previews issue split from the control 
   assert.ok(document.textContent().includes("Goal 已锁定"));
   assert.ok(document.textContent().includes("Plan 已生成"));
   assert.ok(document.textContent().includes("Issue 已预览"));
+  assert.ok(document.textContent().includes("当前旅程"));
+  assert.ok(document.textContent().includes("当前可执行动作"));
+  assert.ok(document.textContent().includes("预览并创建 Issue"));
   assert.ok(document.textContent().includes("Plan 到 Issue 预览"));
   assert.ok(document.textContent().includes("生成 Plan 并预览 Issue"));
   assert.ok(document.textContent().includes("确认后创建 2 个 Multica issue"));
+  assert.ok(document.querySelector(".goal-summary-card"), "Goal should render as a compact summary card");
+  assert.ok(document.querySelector(".journey-header"), "Plan should render the journey rail");
+  assert.ok(document.querySelector(".action-banner"), "Plan should render a single next-action banner");
+  assert.ok(document.querySelector(".goal-detail-disclosure"), "Goal details should be folded into a disclosure");
+  assert.ok(document.querySelector(".plan-step-details"), "Plan step table should be folded into a disclosure");
   assert.equal(document.textContent().includes("Create 2 Multica issues"), false);
   assert.ok(clickLog.includes("data-action:clarify-goal"));
   assert.ok(clickLog.includes("data-action:lock-goal"));
@@ -1091,8 +1099,11 @@ test("GUI previews and explicitly creates business issues from an Agent PlanSet"
   assert.ok(document.textContent().includes("预览业务 Issue"));
   assert.ok(document.textContent().includes("创建全部 Multica Issue"));
   assert.ok(document.textContent().includes("创建此 Issue"));
+  assert.ok(document.textContent().includes("查看写入详情"));
   assert.ok(document.textContent().includes("复制命令"));
   assert.ok(document.textContent().includes("plan_set_1"));
+  assert.ok(document.querySelector(".compact-issue-card"), "Issue preview should use compact action cards");
+  assert.ok(document.querySelector(".issue-write-details"), "CLI command and metadata should live in write details disclosure");
   assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/generate").length, 0);
   assert.equal(fetchCalls.filter((call) => call.url === "/api/plan/apply-issues").length, 0);
 

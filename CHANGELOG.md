@@ -94,6 +94,10 @@ once public releases are cut.
   workbench canvas, low-saturation status gradients, transitional management
   cards, and a clearer Records dashboard hierarchy while keeping mobile as a
   no-overflow fallback rather than the primary target.
+- Changed the Control page into a journey-driven execution surface with a
+  four-step `输入/澄清 Goal -> 锁定 Goal -> 生成 Plan -> 预览并创建 Issue`
+  rail, a single current-action banner, compact Goal summaries, and folded
+  Goal/Plan/Issue write details to reduce small-text overload.
 - Extended Plan issue preview to support `planSet` inputs with one issue
   candidate per parallel sub-plan.
 - Split the GUI `Permissions` page from the `Control` page so Goal/Plan and
