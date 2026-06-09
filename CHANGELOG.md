@@ -147,6 +147,9 @@ once public releases are cut.
 
 ### Fixed
 
+- Fixed Records subscription list rows so issue titles and comment summaries use
+  horizontal single-line truncation instead of vertical overflow in narrow
+  external-browser layouts.
 - Fixed the GUI `新建流程` action so the Control page Goal summary switches to
   an empty `尚未澄清 Goal` state and clears the request input instead of falling
   back to the built-in demo Goal.

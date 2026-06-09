@@ -1642,6 +1642,8 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.subscription-row-title,
+.subscription-row-comment,
 .subscription-title,
 .subscription-comment {
   display: block;
@@ -1649,10 +1651,12 @@ button:disabled {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+  writing-mode: horizontal-tb;
   word-break: normal;
   overflow-wrap: normal;
 }
 
+.subscription-row-title,
 .subscription-title {
   color: var(--text);
   font-size: 14px;
@@ -1660,6 +1664,7 @@ button:disabled {
   white-space: nowrap;
 }
 
+.subscription-row-comment,
 .subscription-comment {
   display: block;
   overflow: hidden;
@@ -1859,7 +1864,7 @@ button:disabled {
   min-width: 0;
 }
 
-.subscription-title {
+.subscription-row-main .subscription-title {
   display: -webkit-box;
   overflow: hidden;
   line-height: 1.35;
@@ -3517,6 +3522,8 @@ button:disabled {
 
   .subscription-row-badges,
   .subscription-inline-actions {
+    grid-column: 1 / -1;
+    grid-row: auto;
     justify-content: flex-start;
     max-width: none;
   }

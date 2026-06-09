@@ -1343,6 +1343,10 @@ test("GUI records workflow snapshots and manages subscribed issue rows", async (
   assert.ok(document.querySelector(".records-activity-panel"), "page events should be moved to a secondary panel");
   assert.ok(document.querySelector(".subscription-workbench"), "issue subscriptions should use a workbench");
   assert.ok(document.querySelector(".subscription-table-row"), "issue subscriptions should render compact rows");
+  assert.ok(document.querySelector(".subscription-row-title"), "subscription rows should use row-scoped title styling");
+  assert.ok(document.querySelector(".subscription-row-comment"), "subscription rows should use row-scoped comment styling");
+  assert.equal(Boolean(document.querySelector(".subscription-table-row .subscription-title")), false);
+  assert.equal(Boolean(document.querySelector(".subscription-table-row .subscription-comment")), false);
   assert.ok(document.querySelector(".subscription-detail-panel"), "issue subscriptions should render selected detail");
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("Issue 执行跟踪"));
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("本地移除"));

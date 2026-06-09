@@ -2199,9 +2199,9 @@
       select.setAttribute("data-action", "select-subscription");
       select.setAttribute("data-subscription-id", subscription.id || subscription.issueId || "");
       const identity = el("span", "subscription-row-identity", subscription.issueIdentifier || subscription.issueId || "未命名 Issue");
-      const title = el("strong", "subscription-title", subscription.title || subscriptionKindLabel(subscription.kind));
+      const title = el("strong", "subscription-row-title", subscription.title || subscriptionKindLabel(subscription.kind));
       const meta = el("span", "subscription-meta", `${subscription.lastKnownStatus || "未同步"}${subscription.lastRunStatus ? ` · Run ${subscription.lastRunStatus}` : ""}${subscription.lastSyncedAt ? ` · ${formatDateTime(subscription.lastSyncedAt)}` : ""}`);
-      const comment = el("span", "subscription-comment", subscription.lastCommentExcerpt || subscription.error || "暂无 comment 摘要。");
+      const comment = el("span", "subscription-row-comment", subscription.lastCommentExcerpt || subscription.error || "暂无 comment 摘要。");
       select.appendChild(identity);
       select.appendChild(title);
       select.appendChild(meta);
