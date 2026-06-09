@@ -1226,10 +1226,14 @@ test("GUI loads and syncs issue subscriptions as one aggregate polling loop", as
   assert.ok(document.querySelector(".records-dashboard"), "records page should render as a dashboard");
   assert.ok(document.querySelector(".records-overview-grid"), "records page should include overview metrics");
   assert.ok(document.querySelector(".records-main-grid"), "records page should split workflow and subscription panels");
-  assert.ok(document.querySelector(".subscription-lane-board"), "subscription groups should render as lanes");
+  assert.ok(document.querySelector(".subscription-workbench"), "subscription groups should render as a list/detail workbench");
+  assert.ok(document.querySelector(".subscription-table-list"), "subscription workbench should include one compact list");
+  assert.ok(document.querySelector(".subscription-detail-panel"), "subscription workbench should include a detail panel");
+  assert.equal(Boolean(document.querySelector(".subscription-lane-board")), false);
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("Assist Goal"));
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("Assist Plan"));
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("Business Issues"));
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("搜索订阅"));
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("SPA-12"));
   assert.equal(fetchCalls.filter((call) => call.url === "/api/issue-subscriptions").length, 1);
   assert.equal(timers.includes(60000), true);
@@ -1337,11 +1341,20 @@ test("GUI records workflow snapshots and manages subscribed issue rows", async (
   assert.ok(document.querySelector(".records-dashboard"), "records page should render dashboard shell");
   assert.ok(document.querySelector(".workflow-record-panel"), "workflow records should be grouped in a panel");
   assert.ok(document.querySelector(".records-activity-panel"), "page events should be moved to a secondary panel");
-  assert.ok(document.querySelector(".subscription-lane-board"), "issue subscriptions should use a lane board");
+  assert.ok(document.querySelector(".subscription-workbench"), "issue subscriptions should use a workbench");
+  assert.ok(document.querySelector(".subscription-table-row"), "issue subscriptions should render compact rows");
+  assert.ok(document.querySelector(".subscription-detail-panel"), "issue subscriptions should render selected detail");
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("Issue 执行跟踪"));
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("暂停"));
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("本地移除"));
   assert.ok(document.querySelector("#records-list").textContentDeep().includes("关闭真实 Issue"));
+  assert.equal(Boolean(document.querySelector(".subscription-lane-board")), false);
+
+  document.querySelector("#subscription-search-input").value = "SPA-12";
+  document.querySelector("#subscription-search-input").dispatchEvent({ type: "input", target: document.querySelector("#subscription-search-input") });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(document.querySelector(".subscription-detail-panel").textContentDeep().includes("SPA-12"));
+  assert.ok(document.querySelector("#records-list").textContentDeep().includes("业务 Issue"));
 
   const newFlow = document.querySelector("[data-action='new-workflow']");
   newFlow.dispatchEvent({ type: "click", target: newFlow });

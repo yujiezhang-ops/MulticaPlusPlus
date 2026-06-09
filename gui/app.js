@@ -286,6 +286,10 @@
     issueSubscriptionWarning: "",
     issueSubscriptionActionStatus: "",
     subscriptionCloseConfirm: "",
+    subscriptionKindFilter: "all",
+    subscriptionStatusFilter: "all",
+    subscriptionSearchQuery: "",
+    selectedSubscriptionId: "",
     hiddenSubscriptionIds: [],
     workflowRecords: [],
     goalClarificationAnswer: "",
@@ -2078,25 +2082,10 @@
     header.appendChild(el("h3", "", "Issue 执行跟踪"));
     header.appendChild(el("span", "config-status", state.issueSubscriptionStatus || "未同步"));
     section.appendChild(header);
-    section.appendChild(el("p", "setting-help", "订阅同步只读取 Multica issue、run 和 comment，不会写入业务 Issue。真实关闭必须输入确认 token。"));
     const subscriptions = visibleSubscriptions();
-    const summary = summarizeSubscriptions(subscriptions);
-    const summaryRow = el("div", "subscription-summary-grid");
-    [
-      ["Assist Goal", summary.assist_goal],
-      ["Assist Plan", summary.assist_plan_split],
-      ["Business Issues", summary.business_issue],
-      ["Active", summary.active],
-      ["Paused", summary.paused],
-      ["Completed", summary.completed],
-      ["Error", summary.error],
-    ].forEach(([label, count]) => {
-      const item = el("div", "subscription-summary-item");
-      item.appendChild(el("span", "section-label", label));
-      item.appendChild(el("strong", "", String(count)));
-      summaryRow.appendChild(item);
-    });
-    section.appendChild(summaryRow);
+    const filtered = filteredSubscriptions(subscriptions);
+    section.appendChild(renderSubscriptionOverview(subscriptions));
+    section.appendChild(renderSubscriptionToolbar(subscriptions));
     if (state.issueSubscriptionWarning) {
       section.appendChild(el("p", "goal-feedback", state.issueSubscriptionWarning));
     }
@@ -2107,90 +2096,226 @@
       section.appendChild(el("p", "setting-help", "暂无可见订阅。Goal 澄清 Assist Issue、Plan 拆分 Assist Issue 和业务 Issue 创建成功后会进入这里；被暂时隐去的订阅仍保留在本地。"));
       return section;
     }
-    const groups = [
-      ["assist_goal", "Assist Goal"],
-      ["assist_plan_split", "Assist Plan"],
-      ["business_issue", "Business Issues"],
-    ];
-    const board = el("div", "subscription-lane-board");
-    groups.forEach(([kind, label]) => {
-      const groupItems = subscriptions.filter((item) => item.kind === kind);
-      const group = el("section", "subscription-group subscription-lane");
-      const groupHeader = el("div", "subscription-lane-header");
-      groupHeader.appendChild(el("h4", "", label));
-      groupHeader.appendChild(el("span", "config-status", String(groupItems.length)));
-      group.appendChild(groupHeader);
-      const list = el("div", "subscription-row-list");
-      if (!groupItems.length) {
-        list.appendChild(el("p", "setting-help", "暂无订阅。"));
-      }
-      groupItems.slice(0, 6).forEach((subscription) => {
-        const item = el("article", "subscription-row");
-        const title = el("div", "subscription-row-main");
-        title.appendChild(el("strong", "subscription-title", `${subscription.issueIdentifier || subscription.issueId} · ${subscription.title || label}`));
-        const meta = el("span", "subscription-meta", `${subscription.state || "active"} · ${subscription.lastKnownStatus || "未同步"}${subscription.lastRunStatus ? ` · Run ${subscription.lastRunStatus}` : ""}`);
-        title.appendChild(meta);
-        if (subscription.lastCommentExcerpt) {
-          title.appendChild(el("span", "subscription-comment", subscription.lastCommentExcerpt));
-        }
-        item.appendChild(title);
-        const actions = el("div", "issue-card-actions subscription-row-actions");
-        const open = el("button", "outline-button compact-button");
-        open.type = "button";
-        open.setAttribute("data-action", "open-issue");
-        open.setAttribute("data-issue-id", subscription.issueId);
-        open.setAttribute("data-issue-identifier", subscription.issueIdentifier || "");
-        open.appendChild(makeIcon("arrow"));
-        open.appendChild(el("span", "", "查看"));
-        const pauseResume = el("button", "outline-button compact-button");
-        pauseResume.type = "button";
-        pauseResume.setAttribute("data-action", subscription.state === "paused" ? "resume-subscription" : "pause-subscription");
-        pauseResume.setAttribute("data-subscription-id", subscription.id);
-        pauseResume.appendChild(makeIcon(subscription.state === "paused" ? "play" : "pause"));
-        pauseResume.appendChild(el("span", "", subscription.state === "paused" ? "恢复" : "暂停"));
-        const hide = el("button", "outline-button compact-button");
-        hide.type = "button";
-        hide.setAttribute("data-action", "hide-subscription");
-        hide.setAttribute("data-subscription-id", subscription.id);
-        hide.appendChild(makeIcon("eye"));
-        hide.appendChild(el("span", "", "隐去"));
-        const remove = el("button", "outline-button compact-button danger-button");
-        remove.type = "button";
-        remove.setAttribute("data-action", "delete-subscription");
-        remove.setAttribute("data-subscription-id", subscription.id);
-        remove.appendChild(makeIcon("x"));
-        remove.appendChild(el("span", "", "移除"));
-        const close = el("button", "outline-button compact-button danger-button");
-        close.type = "button";
-        close.setAttribute("data-action", "close-subscription");
-        close.setAttribute("data-subscription-id", subscription.id);
-        close.appendChild(makeIcon("x"));
-        close.appendChild(el("span", "", "关闭"));
-        actions.appendChild(open);
-        actions.appendChild(pauseResume);
-        actions.appendChild(hide);
-        actions.appendChild(remove);
-        actions.appendChild(close);
-        item.appendChild(actions);
-        list.appendChild(item);
-      });
-      group.appendChild(list);
-      board.appendChild(group);
+    section.appendChild(el("p", "setting-help", "订阅同步只读取 Multica issue、run 和 comment，不会写入业务 Issue。真实关闭必须在右侧详情中输入确认 token。"));
+    const workbench = el("div", "subscription-workbench");
+    workbench.appendChild(renderSubscriptionList(filtered));
+    workbench.appendChild(renderSubscriptionDetailPanel(selectedSubscription(filtered)));
+    section.appendChild(workbench);
+    return section;
+  }
+
+  function renderSubscriptionOverview(subscriptions) {
+    const summary = summarizeSubscriptions(subscriptions);
+    const overview = el("div", "subscription-overview-grid");
+    [
+      ["运行中", summary.active],
+      ["需处理", summary.needsAttention],
+      ["已完成", summary.completed],
+      ["错误", summary.error],
+    ].forEach(([label, count]) => {
+      const item = el("div", "subscription-overview-item");
+      item.appendChild(el("span", "section-label", label));
+      item.appendChild(el("strong", "", String(count)));
+      overview.appendChild(item);
     });
-    section.appendChild(board);
+    return overview;
+  }
+
+  function renderSubscriptionToolbar(subscriptions) {
+    const summary = summarizeSubscriptions(subscriptions);
+    const toolbar = el("section", "subscription-toolbar");
+    const kindTabs = el("div", "subscription-filter-tabs");
+    [
+      ["all", "全部", subscriptions.length],
+      ["assist_goal", "Assist Goal", summary.assist_goal],
+      ["assist_plan_split", "Assist Plan", summary.assist_plan_split],
+      ["business_issue", "Business Issues", summary.business_issue],
+    ].forEach(([value, label, count]) => {
+      const button = el("button", "subscription-filter-tab");
+      button.type = "button";
+      button.setAttribute("data-action", "filter-subscription-kind");
+      button.setAttribute("data-subscription-kind", value);
+      button.setAttribute("aria-pressed", state.subscriptionKindFilter === value ? "true" : "false");
+      button.appendChild(el("span", "", label));
+      button.appendChild(el("strong", "", String(count)));
+      kindTabs.appendChild(button);
+    });
+    toolbar.appendChild(kindTabs);
+
+    const statusTabs = el("div", "subscription-filter-tabs subscription-status-tabs");
+    [
+      ["all", "全部状态", subscriptions.length],
+      ["active", "Active", summary.active],
+      ["paused", "Paused", summary.paused],
+      ["completed", "Completed", summary.completed],
+      ["error", "Error", summary.error],
+    ].forEach(([value, label, count]) => {
+      const button = el("button", "subscription-filter-tab");
+      button.type = "button";
+      button.setAttribute("data-action", "filter-subscription-status");
+      button.setAttribute("data-subscription-status", value);
+      button.setAttribute("aria-pressed", state.subscriptionStatusFilter === value ? "true" : "false");
+      button.appendChild(el("span", "", label));
+      button.appendChild(el("strong", "", String(count)));
+      statusTabs.appendChild(button);
+    });
+    toolbar.appendChild(statusTabs);
+
+    const search = el("label", "subscription-search");
+    search.appendChild(el("span", "section-label", "搜索订阅"));
+    const input = el("input", "confirm-input");
+    input.id = "subscription-search-input";
+    input.value = state.subscriptionSearchQuery || "";
+    input.placeholder = "Issue ID、标题、状态";
+    input.setAttribute("aria-label", "搜索 Issue 订阅");
+    search.appendChild(input);
+    const clear = el("button", "outline-button compact-button");
+    clear.type = "button";
+    clear.setAttribute("data-action", "clear-subscription-search");
+    clear.appendChild(makeIcon("x"));
+    clear.appendChild(el("span", "", "清空"));
+    search.appendChild(clear);
+    toolbar.appendChild(search);
+    return toolbar;
+  }
+
+  function renderSubscriptionList(subscriptions) {
+    const panel = el("section", "subscription-list-panel");
+    const header = el("div", "split-header");
+    header.appendChild(el("h4", "", "订阅列表"));
+    header.appendChild(el("span", "config-status", `${subscriptions.length} 条`));
+    panel.appendChild(header);
+    const list = el("div", "subscription-table-list");
+    if (!subscriptions.length) {
+      list.appendChild(el("p", "setting-help", "当前筛选下没有订阅。调整类型、状态或搜索条件。"));
+      panel.appendChild(list);
+      return panel;
+    }
+    subscriptions.forEach((subscription) => {
+      const row = el("article", `subscription-table-row ${subscription.id === effectiveSelectedSubscriptionId(subscriptions) ? "is-selected" : ""}`.trim());
+      row.setAttribute("data-subscription-id", subscription.id || subscription.issueId || "");
+      const select = el("button", "subscription-row-select");
+      select.type = "button";
+      select.setAttribute("data-action", "select-subscription");
+      select.setAttribute("data-subscription-id", subscription.id || subscription.issueId || "");
+      const identity = el("span", "subscription-row-identity", subscription.issueIdentifier || subscription.issueId || "未命名 Issue");
+      const title = el("strong", "subscription-title", subscription.title || subscriptionKindLabel(subscription.kind));
+      const meta = el("span", "subscription-meta", `${subscription.lastKnownStatus || "未同步"}${subscription.lastRunStatus ? ` · Run ${subscription.lastRunStatus}` : ""}${subscription.lastSyncedAt ? ` · ${formatDateTime(subscription.lastSyncedAt)}` : ""}`);
+      const comment = el("span", "subscription-comment", subscription.lastCommentExcerpt || subscription.error || "暂无 comment 摘要。");
+      select.appendChild(identity);
+      select.appendChild(title);
+      select.appendChild(meta);
+      select.appendChild(comment);
+      row.appendChild(select);
+      const badges = el("div", "subscription-row-badges");
+      badges.appendChild(el("span", "config-status", subscriptionKindLabel(subscription.kind)));
+      badges.appendChild(el("span", `subscription-state-badge state-${subscriptionStateKey(subscription)}`, subscription.error ? "error" : (subscription.state || "active")));
+      row.appendChild(badges);
+      const actions = el("div", "subscription-inline-actions");
+      const open = el("button", "outline-button compact-button");
+      open.type = "button";
+      open.setAttribute("data-action", "open-issue");
+      open.setAttribute("data-issue-id", subscription.issueId);
+      open.setAttribute("data-issue-identifier", subscription.issueIdentifier || "");
+      open.appendChild(makeIcon("arrow"));
+      open.appendChild(el("span", "", "查看"));
+      const pauseResume = el("button", "outline-button compact-button");
+      pauseResume.type = "button";
+      pauseResume.setAttribute("data-action", subscription.state === "paused" ? "resume-subscription" : "pause-subscription");
+      pauseResume.setAttribute("data-subscription-id", subscription.id);
+      pauseResume.appendChild(makeIcon(subscription.state === "paused" ? "play" : "pause"));
+      pauseResume.appendChild(el("span", "", subscription.state === "paused" ? "恢复" : "暂停"));
+      actions.appendChild(open);
+      actions.appendChild(pauseResume);
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
+    return panel;
+  }
+
+  function renderSubscriptionDetailPanel(subscription) {
+    const panel = el("aside", "subscription-detail-panel");
+    if (!subscription) {
+      panel.appendChild(el("h4", "", "订阅详情"));
+      panel.appendChild(el("p", "setting-help", "从左侧列表选择一条订阅，查看 run/comment 同步结果和本地管理动作。"));
+      return panel;
+    }
+    const title = el("div", "subscription-detail-title");
+    title.appendChild(el("span", "section-label", subscriptionKindLabel(subscription.kind)));
+    title.appendChild(el("h4", "", subscription.issueIdentifier || subscription.issueId || "未命名 Issue"));
+    title.appendChild(el("p", "", subscription.title || "未命名订阅"));
+    panel.appendChild(title);
+
+    const definition = el("dl", "config-definition subscription-detail-definition");
+    [
+      ["订阅状态", subscription.state || "active"],
+      ["Issue 状态", subscription.lastKnownStatus || "未同步"],
+      ["Run 状态", subscription.lastRunStatus || "未同步"],
+      ["最后同步", subscription.lastSyncedAt ? formatDateTime(subscription.lastSyncedAt) : "未同步"],
+      ["Goal", subscription.goalId],
+      ["PlanSet", subscription.planSetId],
+      ["SubPlan", subscription.subplanId],
+      ["来源", subscription.source],
+    ].filter(([, value]) => value !== undefined && value !== null && value !== "").forEach(([label, value]) => {
+      definition.appendChild(el("dt", "", label));
+      definition.appendChild(el("dd", "", String(value)));
+    });
+    panel.appendChild(definition);
+    panel.appendChild(el("p", "subscription-detail-comment", subscription.lastCommentExcerpt || subscription.error || "暂无 comment 摘要。"));
+
+    const actions = el("div", "subscription-detail-actions");
+    const open = el("button", "outline-button compact-button");
+    open.type = "button";
+    open.setAttribute("data-action", "open-issue");
+    open.setAttribute("data-issue-id", subscription.issueId);
+    open.setAttribute("data-issue-identifier", subscription.issueIdentifier || "");
+    open.appendChild(makeIcon("arrow"));
+    open.appendChild(el("span", "", "打开 Issue"));
+    const pauseResume = el("button", "outline-button compact-button");
+    pauseResume.type = "button";
+    pauseResume.setAttribute("data-action", subscription.state === "paused" ? "resume-subscription" : "pause-subscription");
+    pauseResume.setAttribute("data-subscription-id", subscription.id);
+    pauseResume.appendChild(makeIcon(subscription.state === "paused" ? "play" : "pause"));
+    pauseResume.appendChild(el("span", "", subscription.state === "paused" ? "恢复订阅" : "暂停订阅"));
+    const hide = el("button", "outline-button compact-button");
+    hide.type = "button";
+    hide.setAttribute("data-action", "hide-subscription");
+    hide.setAttribute("data-subscription-id", subscription.id);
+    hide.appendChild(makeIcon("eye"));
+    hide.appendChild(el("span", "", "暂时隐去"));
+    const remove = el("button", "outline-button compact-button danger-button");
+    remove.type = "button";
+    remove.setAttribute("data-action", "delete-subscription");
+    remove.setAttribute("data-subscription-id", subscription.id);
+    remove.appendChild(makeIcon("x"));
+    remove.appendChild(el("span", "", "本地移除订阅"));
+    actions.appendChild(open);
+    actions.appendChild(pauseResume);
+    actions.appendChild(hide);
+    actions.appendChild(remove);
+    panel.appendChild(actions);
+
     const danger = el("section", "subscription-danger-zone");
     const dangerCopy = el("div", "");
-    dangerCopy.appendChild(el("h4", "", "危险操作确认"));
-    dangerCopy.appendChild(el("p", "setting-help", `关闭真实 Issue 会执行 multica issue status <id> cancelled --output json。本地移除订阅不会影响 Multica。`));
+    dangerCopy.appendChild(el("h4", "", "关闭真实 Issue"));
+    dangerCopy.appendChild(el("p", "setting-help", `会执行 multica issue status <id> cancelled --output json。本地移除订阅不会影响 Multica。`));
     const closeInput = el("input", "confirm-input subscription-close-confirm");
     closeInput.id = "subscription-close-confirm";
     closeInput.value = state.subscriptionCloseConfirm;
     closeInput.placeholder = CLOSE_SUBSCRIPTION_CONFIRMATION_TOKEN;
     closeInput.setAttribute("aria-label", "关闭真实 Issue 确认 token");
+    const close = el("button", "outline-button compact-button danger-button");
+    close.type = "button";
+    close.setAttribute("data-action", "close-subscription");
+    close.setAttribute("data-subscription-id", subscription.id);
+    close.appendChild(makeIcon("x"));
+    close.appendChild(el("span", "", "关闭真实 Issue"));
     danger.appendChild(dangerCopy);
     danger.appendChild(closeInput);
-    section.appendChild(danger);
-    return section;
+    danger.appendChild(close);
+    panel.appendChild(danger);
+    return panel;
   }
 
   function summarizeSubscriptions(subscriptions) {
@@ -2198,6 +2323,7 @@
       acc[item.kind] = (acc[item.kind] || 0) + 1;
       acc[item.state] = (acc[item.state] || 0) + 1;
       if (item.error) acc.error += 1;
+      if (item.error || item.lastRunStatus === "failed" || item.lastKnownStatus === "blocked") acc.needsAttention += 1;
       return acc;
     }, {
       assist_goal: 0,
@@ -2207,12 +2333,88 @@
       paused: 0,
       completed: 0,
       error: 0,
+      needsAttention: 0,
     });
   }
 
   function visibleSubscriptions() {
     const hidden = new Set((state.hiddenSubscriptionIds || []).map(String));
     return (state.issueSubscriptions || []).filter((subscription) => !hidden.has(String(subscription.id || subscription.issueId)));
+  }
+
+  function filteredSubscriptions(subscriptions = visibleSubscriptions()) {
+    const query = String(state.subscriptionSearchQuery || "").trim().toLowerCase();
+    const kindFilter = state.subscriptionKindFilter || "all";
+    const statusFilter = state.subscriptionStatusFilter || "all";
+    return sortSubscriptionsForAttention(subscriptions.filter((subscription) => {
+      if (kindFilter !== "all" && subscription.kind !== kindFilter) return false;
+      if (statusFilter !== "all") {
+        if (statusFilter === "error") {
+          if (!subscription.error) return false;
+        } else if ((subscription.state || "active") !== statusFilter) {
+          return false;
+        }
+      }
+      if (!query) return true;
+      return [
+        subscription.issueIdentifier,
+        subscription.issueId,
+        subscription.title,
+        subscription.kind,
+        subscription.state,
+        subscription.lastKnownStatus,
+        subscription.lastRunStatus,
+      ].filter(Boolean).join(" ").toLowerCase().includes(query);
+    }));
+  }
+
+  function sortSubscriptionsForAttention(subscriptions) {
+    const rank = (subscription) => {
+      if (subscription.error || subscription.lastRunStatus === "failed") return 0;
+      if ((subscription.state || "active") === "active" || subscription.lastRunStatus === "running") return 1;
+      if (subscription.state === "paused") return 2;
+      if (subscription.state === "completed") return 3;
+      return 4;
+    };
+    return [...subscriptions].sort((a, b) => {
+      const rankDiff = rank(a) - rank(b);
+      if (rankDiff) return rankDiff;
+      return dateValue(b.lastSyncedAt || b.updatedAt || b.createdAt) - dateValue(a.lastSyncedAt || a.updatedAt || a.createdAt);
+    });
+  }
+
+  function selectedSubscription(subscriptions = filteredSubscriptions()) {
+    const selectedId = effectiveSelectedSubscriptionId(subscriptions);
+    return subscriptions.find((subscription) => String(subscription.id || subscription.issueId) === selectedId) || null;
+  }
+
+  function effectiveSelectedSubscriptionId(subscriptions = filteredSubscriptions()) {
+    if (!subscriptions.length) return "";
+    const current = String(state.selectedSubscriptionId || "");
+    if (current && subscriptions.some((subscription) => String(subscription.id || subscription.issueId) === current)) {
+      return current;
+    }
+    const attention = subscriptions.find((subscription) => subscription.error || (subscription.state || "active") === "active");
+    return String((attention || subscriptions[0]).id || (attention || subscriptions[0]).issueId || "");
+  }
+
+  function subscriptionKindLabel(kind) {
+    return {
+      assist_goal: "Assist Goal",
+      assist_plan_split: "Assist Plan",
+      business_issue: "Business Issue",
+    }[kind] || "Issue";
+  }
+
+  function subscriptionStateKey(subscription) {
+    if (subscription?.error) return "error";
+    return String(subscription?.state || "active").replace(/[^a-z0-9_-]/gi, "_");
+  }
+
+  function dateValue(value) {
+    if (!value) return 0;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
   }
 
   function updateSubscriptionInState(subscription) {
@@ -2641,6 +2843,21 @@
       } else if (kind === "open-issue") {
         const issueId = action.getAttribute("data-issue-identifier") || action.getAttribute("data-issue-id") || "";
         appendRecord("打开 Issue", `请在 Multica 中查看 ${issueId}。`);
+      } else if (kind === "select-subscription") {
+        state.selectedSubscriptionId = action.getAttribute("data-subscription-id") || "";
+        renderAll();
+      } else if (kind === "filter-subscription-kind") {
+        state.subscriptionKindFilter = action.getAttribute("data-subscription-kind") || "all";
+        state.selectedSubscriptionId = effectiveSelectedSubscriptionId(filteredSubscriptions());
+        renderAll();
+      } else if (kind === "filter-subscription-status") {
+        state.subscriptionStatusFilter = action.getAttribute("data-subscription-status") || "all";
+        state.selectedSubscriptionId = effectiveSelectedSubscriptionId(filteredSubscriptions());
+        renderAll();
+      } else if (kind === "clear-subscription-search") {
+        state.subscriptionSearchQuery = "";
+        state.selectedSubscriptionId = effectiveSelectedSubscriptionId(filteredSubscriptions());
+        renderAll();
       } else if (kind === "pause-subscription" || kind === "resume-subscription") {
         updateSubscriptionState(action.getAttribute("data-subscription-id") || "", kind === "pause-subscription" ? "pause" : "resume");
       } else if (kind === "hide-subscription") {
@@ -2649,6 +2866,7 @@
           state.hiddenSubscriptionIds.push(subscriptionId);
           persistHiddenSubscriptions();
           state.issueSubscriptionActionStatus = "订阅已暂时隐去；本地订阅表和 Multica Issue 未改变。";
+          state.selectedSubscriptionId = effectiveSelectedSubscriptionId(filteredSubscriptions());
           renderAll();
         }
       } else if (kind === "delete-subscription") {
@@ -2731,6 +2949,11 @@
       }
       if (event.target.matches("#subscription-close-confirm")) {
         state.subscriptionCloseConfirm = event.target.value;
+      }
+      if (event.target.matches("#subscription-search-input")) {
+        state.subscriptionSearchQuery = event.target.value;
+        state.selectedSubscriptionId = effectiveSelectedSubscriptionId(filteredSubscriptions());
+        renderAll();
       }
     });
 
@@ -3097,6 +3320,7 @@
       const payload = await response.json();
       if (!response.ok || !payload.ok) throw new Error(payload.error || "subscription delete failed");
       removeSubscriptionFromState(subscriptionId);
+      state.selectedSubscriptionId = effectiveSelectedSubscriptionId(filteredSubscriptions());
       state.issueSubscriptionActionStatus = "订阅已从本地移除；真实 Multica Issue 未改变。";
       appendRecord("订阅已本地移除", subscriptionId);
       renderAll();
@@ -3131,6 +3355,7 @@
         throw new Error(payload.error || payload.result?.error || payload.result?.reason || "subscription close failed");
       }
       updateSubscriptionInState(payload.result.subscription);
+      state.selectedSubscriptionId = String(payload.result.subscription?.id || payload.result.subscription?.issueId || subscriptionId);
       state.issueSubscriptionActionStatus = `${payload.result.subscription?.issueIdentifier || payload.result.subscription?.issueId || subscriptionId} 已关闭为 cancelled。`;
       appendRecord("真实 Issue 已关闭", state.issueSubscriptionActionStatus);
       renderAll();

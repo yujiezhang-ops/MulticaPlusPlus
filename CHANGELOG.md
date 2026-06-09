@@ -98,6 +98,10 @@ once public releases are cut.
   four-step `输入/澄清 Goal -> 锁定 Goal -> 生成 Plan -> 预览并创建 Issue`
   rail, a single current-action banner, compact Goal summaries, and folded
   Goal/Plan/Issue write details to reduce small-text overload.
+- Redesigned the Records page `Issue 执行跟踪` section from three scrolling
+  subscription lanes into an attention-first workbench with compact metrics,
+  type/status filters, local search, a single subscription list, and a selected
+  Issue detail panel for secondary and dangerous actions.
 - Extended Plan issue preview to support `planSet` inputs with one issue
   candidate per parallel sub-plan.
 - Split the GUI `Permissions` page from the `Control` page so Goal/Plan and

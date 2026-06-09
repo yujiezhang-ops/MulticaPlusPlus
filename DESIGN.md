@@ -72,6 +72,10 @@ hero treatment.
   preview, and confirmed Issue creation.
 - `Records` is the management surface: workflow snapshots, Assist Issue
   subscriptions, Business Issue subscriptions, hidden/paused/closed state.
+- `Records` subscription tracking should use an attention-first workbench:
+  compact overview metrics, type/status filters, one scrollable issue list, and
+  a selected-detail panel for destructive or secondary actions. Avoid multiple
+  side-by-side scrolling lanes of full issue cards.
 - Use CSS Grid for page shells and dashboard boards. Avoid deeply nested cards
   inside decorative cards.
 - Mobile and narrow widths only need a reliable single-column fallback with no

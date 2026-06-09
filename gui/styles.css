@@ -1365,6 +1365,7 @@ button:disabled {
   display: grid;
   gap: 12px;
   min-width: 0;
+  container-type: inline-size;
   padding: 14px;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
@@ -1450,14 +1451,20 @@ button:disabled {
   overflow: auto;
 }
 
-.subscription-summary-grid {
+.subscription-summary-grid,
+.subscription-overview-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(72px, 1fr));
   gap: 8px;
   min-width: 0;
 }
 
-.subscription-summary-item {
+.subscription-overview-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.subscription-summary-item,
+.subscription-overview-item {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -1467,28 +1474,88 @@ button:disabled {
   background: rgba(11, 14, 18, 0.86);
 }
 
-.subscription-summary-item strong {
+.subscription-summary-item strong,
+.subscription-overview-item strong {
   color: var(--text);
   font-size: 18px;
   line-height: 1;
 }
 
-.subscription-lane-board {
+.subscription-workbench {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.62fr) minmax(320px, 1fr);
   gap: 12px;
+  align-items: start;
   min-width: 0;
 }
 
-.subscription-group {
+.subscription-toolbar,
+.subscription-list-panel,
+.subscription-detail-panel {
   display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.subscription-toolbar {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(11, 14, 18, 0.7);
+}
+
+.subscription-filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
 
-.subscription-lane {
-  align-content: start;
-  min-height: 0;
+.subscription-status-tabs {
+  padding-top: 2px;
+}
+
+.subscription-filter-tab {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(7, 9, 12, 0.74);
+  cursor: pointer;
+}
+
+.subscription-filter-tab[aria-pressed="true"] {
+  border-color: rgba(170, 184, 162, 0.48);
+  color: var(--text);
+  background:
+    linear-gradient(135deg, rgba(170, 184, 162, 0.12), rgba(255, 255, 255, 0.018)),
+    var(--surface-active);
+}
+
+.subscription-filter-tab strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.subscription-search {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  min-width: 0;
+}
+
+.subscription-search .section-label {
+  grid-column: 1 / -1;
+}
+
+.subscription-list-panel,
+.subscription-detail-panel {
   padding: 12px;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
@@ -1497,32 +1564,19 @@ button:disabled {
     #0d1014;
 }
 
-.subscription-lane-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-}
-
-.subscription-group h4 {
-  margin: 0;
-  font-size: 13px;
-}
-
 .subscription-comment {
   color: var(--muted);
 }
 
-.subscription-row-list,
+.subscription-table-list,
 .workflow-record-list {
   display: grid;
   gap: 8px;
   min-width: 0;
 }
 
-.subscription-row-list {
-  max-height: 430px;
+.subscription-table-list {
+  max-height: 520px;
   overflow: auto;
   padding-right: 2px;
 }
@@ -1534,7 +1588,7 @@ button:disabled {
   padding-right: 2px;
 }
 
-.subscription-row,
+.subscription-table-row,
 .workflow-record-card,
 .records-toolbar,
 .legacy-record-card {
@@ -1547,6 +1601,172 @@ button:disabled {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012)),
     #101419;
+}
+
+.subscription-table-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  min-height: 82px;
+  padding: 10px;
+}
+
+.subscription-table-row.is-selected {
+  border-color: rgba(170, 184, 162, 0.46);
+  background:
+    linear-gradient(135deg, rgba(170, 184, 162, 0.1), rgba(255, 255, 255, 0.016)),
+    #11161b;
+}
+
+.subscription-row-select {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subscription-row-select:focus-visible {
+  outline: 2px solid rgba(170, 184, 162, 0.5);
+  outline-offset: 3px;
+}
+
+.subscription-row-identity {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.subscription-title,
+.subscription-comment {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subscription-title {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.subscription-comment {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
+.subscription-row-badges,
+.subscription-inline-actions,
+.subscription-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.subscription-row-badges {
+  justify-content: flex-end;
+  max-width: 160px;
+}
+
+.subscription-inline-actions {
+  justify-content: flex-end;
+}
+
+.subscription-state-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(7, 9, 12, 0.74);
+  font-size: 12px;
+}
+
+.subscription-state-badge.state-active {
+  border-color: rgba(170, 184, 162, 0.36);
+  color: var(--text);
+}
+
+.subscription-state-badge.state-paused {
+  border-color: rgba(211, 181, 121, 0.34);
+  color: #e3cf9a;
+}
+
+.subscription-state-badge.state-completed {
+  color: var(--muted);
+}
+
+.subscription-state-badge.state-error {
+  border-color: rgba(215, 154, 139, 0.44);
+  color: #efb3a8;
+}
+
+.subscription-detail-panel {
+  position: sticky;
+  top: 88px;
+  align-self: start;
+  max-height: min(680px, calc(100vh - 120px));
+  overflow: auto;
+}
+
+.subscription-detail-title {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.subscription-detail-title h4,
+.subscription-detail-title p {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.subscription-detail-title h4 {
+  font-size: 18px;
+}
+
+.subscription-detail-title p,
+.subscription-detail-comment {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.subscription-detail-title p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.subscription-detail-definition {
+  grid-template-columns: minmax(90px, 0.44fr) minmax(0, 1fr);
+}
+
+.subscription-detail-comment {
+  min-width: 0;
+  max-height: 118px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.15);
+  overflow: auto;
+  overflow-wrap: anywhere;
 }
 
 .records-toolbar {
@@ -1649,9 +1869,9 @@ button:disabled {
 
 .subscription-danger-zone {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 460px);
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
-  align-items: end;
+  align-items: start;
   min-width: 0;
   padding-top: 10px;
   border-top: 1px solid var(--line);
@@ -1663,7 +1883,45 @@ button:disabled {
 }
 
 .subscription-danger-zone .setting-help {
-  max-width: 72ch;
+  max-width: 54ch;
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 900px) {
+  .subscription-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .subscription-detail-panel {
+    position: static;
+  }
+
+  .subscription-table-list {
+    max-height: 420px;
+  }
+
+  .subscription-table-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .subscription-inline-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@container (max-width: 640px) {
+  .subscription-overview-grid,
+  .subscription-table-row,
+  .subscription-search {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .subscription-row-badges,
+  .subscription-inline-actions {
+    justify-content: flex-start;
+    max-width: none;
+  }
 }
 
 .section-label,
@@ -3126,15 +3384,17 @@ button:disabled {
   }
 
   .records-main-grid,
+  .subscription-workbench,
   .subscription-danger-zone {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .subscription-lane-board {
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  .subscription-detail-panel {
+    position: static;
   }
 
-  .subscription-summary-grid {
+  .subscription-summary-grid,
+  .subscription-overview-grid {
     grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   }
 
@@ -3232,11 +3492,22 @@ button:disabled {
 
   .records-overview-grid,
   .workflow-record-list,
-  .subscription-lane-board {
+  .subscription-workbench,
+  .subscription-overview-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .subscription-row-list {
+  .subscription-table-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .subscription-row-badges,
+  .subscription-inline-actions {
+    justify-content: flex-start;
+    max-width: none;
+  }
+
+  .subscription-table-list {
     max-height: 320px;
   }
 
